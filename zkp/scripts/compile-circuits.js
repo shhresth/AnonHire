@@ -26,7 +26,7 @@ async function compileCircuit(circuitName, circuitFile) {
   
   try {
     // Compile circuit
-    const compileCmd = `circom2 ${circuitPath} --r1cs --wasm --sym -o ${outputDir} -l ../node_modules`;
+        const compileCmd = `circom2 ${circuitPath} --r1cs --wasm --sym -o ${outputDir} -l ../node_modules`;
     console.log(`Running: ${compileCmd}`);
     
     const { stdout, stderr } = await execAsync(compileCmd);
