@@ -57,10 +57,12 @@ export const issueAcademicCredential = async (
     // Encrypt credential data
     const encryptedData = encryptionService.encrypt(JSON.stringify(credentialData));
 
-    // Upload to IPFS
+    // Upload encrypted payload to IPFS (store ciphertext only)
     const ipfsHash = await ipfsService.uploadJSON({
-      ...credentialData,
-      encrypted: true
+      encrypted: true,
+      schema: 'anonhire.v1',
+      type: 'AcademicCredential',
+      ciphertext: encryptedData
     });
 
     logger.info(`Credential uploaded to IPFS: ${ipfsHash}`);
@@ -160,7 +162,13 @@ export const issueJobCredential = async (
     };
 
     const encryptedData = encryptionService.encrypt(JSON.stringify(credentialData));
-    const ipfsHash = await ipfsService.uploadJSON({ ...credentialData, encrypted: true });
+    // Upload encrypted payload to IPFS (store ciphertext only)
+    const ipfsHash = await ipfsService.uploadJSON({
+      encrypted: true,
+      schema: 'anonhire.v1',
+      type: 'JobCredential',
+      ciphertext: encryptedData
+    });
 
     const txHash = await blockchainService.issueJobVC(subjectAddress, ipfsHash, 0);
 
@@ -244,7 +252,13 @@ export const issueInternshipCredential = async (
     };
 
     const encryptedData = encryptionService.encrypt(JSON.stringify(credentialData));
-    const ipfsHash = await ipfsService.uploadJSON({ ...credentialData, encrypted: true });
+    // Upload encrypted payload to IPFS (store ciphertext only)
+    const ipfsHash = await ipfsService.uploadJSON({
+      encrypted: true,
+      schema: 'anonhire.v1',
+      type: 'InternshipCredential',
+      ciphertext: encryptedData
+    });
 
     const txHash = await blockchainService.issueInternshipVC(subjectAddress, ipfsHash, 0);
 
