@@ -116,22 +116,16 @@ export default function VerifierPage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
                   <div className="bg-gray-50 p-4 rounded-lg">
                     <h4 className="font-semibold text-gray-900 mb-2">Credential Details</h4>
-                    <p className="text-sm text-gray-600">
-                      <strong>Type:</strong> {verificationResult.credentialType || 'N/A'}
-                    </p>
-                    <p className="text-sm text-gray-600">
-                      <strong>Issued:</strong> {verificationResult.issuedAt ? new Date(verificationResult.issuedAt).toLocaleDateString() : 'N/A'}
-                    </p>
-                    <p className="text-sm text-gray-600">
-                      <strong>Status:</strong> {verificationResult.isRevoked ? 'Revoked' : 'Active'}
-                    </p>
+                    <p className="text-sm text-gray-600"><strong>Type:</strong> {verificationResult?.data?.credential?.type ?? 'N/A'}</p>
+                    <p className="text-sm text-gray-600"><strong>Issued:</strong> {verificationResult?.data?.credential?.issuedAt ? new Date(verificationResult.data.credential.issuedAt).toLocaleDateString() : 'N/A'}</p>
+                    <p className="text-sm text-gray-600"><strong>Status:</strong> {(verificationResult?.data?.isRevokedDb || verificationResult?.data?.isRevokedOnChain) ? 'Revoked' : 'Active'}</p>
+                    <p className="text-sm text-gray-600 break-all"><strong>Credential Hash:</strong> {verificationResult?.data?.credential?.credentialHash ?? credentialHash}</p>
                   </div>
                   
                   <div className="bg-gray-50 p-4 rounded-lg">
                     <h4 className="font-semibold text-gray-900 mb-2">Blockchain Info</h4>
-                    <p className="text-sm text-gray-600">
-                      <strong>Transaction:</strong> {verificationResult.txHash ? `${verificationResult.txHash.slice(0, 10)}...` : 'N/A'}
-                    </p>
+                    <p className="text-sm text-gray-600 break-all"><strong>Transaction:</strong> {verificationResult?.data?.credential?.txHash ?? 'N/A'}</p>
+                    <p className="text-sm text-gray-600 break-all"><strong>IPFS CID:</strong> {verificationResult?.data?.credential?.ipfsHash ?? 'N/A'}</p>
                     <p className="text-sm text-gray-600">
                       <strong>Verified:</strong> {new Date().toLocaleString()}
                     </p>

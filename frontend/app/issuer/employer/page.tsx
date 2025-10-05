@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { FaBriefcase, FaUserTie, FaCheck } from 'react-icons/fa';
+import { ethers } from 'ethers';
 
 export default function EmployerIssuerPage() {
   const [formData, setFormData] = useState({
@@ -17,6 +18,7 @@ export default function EmployerIssuerPage() {
   });
   const [isIssuing, setIsIssuing] = useState(false);
   const [result, setResult] = useState<any>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value, type } = e.target;
@@ -26,25 +28,95 @@ export default function EmployerIssuerPage() {
     });
   };
 
+  async function ensureBackendAuth(): Promise<string | null> {
+    try {
+      const existing = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+      if (existing) return existing;
+
+      const eth: any = (window as any).ethereum;
+      if (!eth) { setAuthError('MetaMask not found.'); return null; }
+      const accounts: string[] = await eth.request({ method: 'eth_requestAccounts' });
+      const issuerAddress = accounts[0];
+      if (!issuerAddress) { setAuthError('No wallet connected.'); return null; }
+
+      const nonceRes = await fetch(`http://localhost:3001/api/v1/auth/nonce/${issuerAddress}`);
+      const nonceJson = await nonceRes.json();
+      const nonce = nonceJson?.nonce || nonceJson?.data?.nonce;
+      if (!nonce) { setAuthError('Failed to get nonce.'); return null; }
+
+      const provider = new ethers.BrowserProvider(eth);
+      const signer = await provider.getSigner();
+      const messageToSign = `Sign this message to login. Nonce: ${nonce}`;
+      const signature = await signer.signMessage(messageToSign);
+
+      const verifyRes = await fetch('http://localhost:3001/api/v1/auth/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: issuerAddress, signature, message: messageToSign })
+      });
+      const verifyText = await verifyRes.text();
+      let verifyJson: any = null; try { verifyJson = JSON.parse(verifyText); } catch {}
+      const token = verifyJson?.token || verifyJson?.data?.token;
+      if (!verifyRes.ok || !token) {
+        if (verifyRes.status === 404 && /User not found/i.test(verifyJson?.message || '')) {
+          const registerRes = await fetch('http://localhost:3001/api/v1/auth/register', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ address: issuerAddress, role: 'EMPLOYER' })
+          });
+          if (registerRes.ok) {
+            const retry = await fetch('http://localhost:3001/api/v1/auth/login', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ address: issuerAddress, signature, message: messageToSign })
+            });
+            const retryText = await retry.text();
+            let retryJson: any = null; try { retryJson = JSON.parse(retryText); } catch {}
+            const retryToken = retryJson?.token || retryJson?.data?.token;
+            if (retry.ok && retryToken) { localStorage.setItem('token', retryToken); setAuthError(null); return retryToken; }
+          }
+        }
+        setAuthError(verifyJson?.message || `Authentication failed (status ${verifyRes.status}). ${verifyText?.slice(0,200)}`);
+        return null;
+      }
+      localStorage.setItem('token', token);
+      setAuthError(null);
+      return token;
+    } catch (e: any) {
+      setAuthError(e?.message || 'Authentication error');
+      return null;
+    }
+  }
+
   const handleIssueCredential = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsIssuing(true);
     
     try {
+      let token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+      if (!token) {
+        token = await ensureBackendAuth();
+        if (!token) { setIsIssuing(false); return; }
+      }
+
       const response = await fetch('http://localhost:3001/api/v1/credentials/job', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
-          ...formData,
+          subjectAddress: formData.subjectAddress,
+          employeeName: formData.employeeName,
+          position: formData.position,
           startDate: new Date(formData.startDate).toISOString(),
-          endDate: formData.isCurrent ? null : new Date(formData.endDate).toISOString(),
+          endDate: formData.isCurrent ? new Date().toISOString() : new Date(formData.endDate).toISOString(),
+          experienceMonths: 0,
+          companyName: formData.companyName,
+          skills: [],
         }),
       });
       
-      const result = await response.json();
-      setResult(result);
+      const text = await response.text();
+      let json: any = null; try { json = JSON.parse(text); } catch {}
+      setResult(json ?? { raw: text });
       
       if (response.ok) {
         // Reset form on success
@@ -240,6 +312,10 @@ export default function EmployerIssuerPage() {
           </form>
         </div>
 
+        {authError && (
+          <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded mb-6">{authError}</div>
+        )}
+
         {/* Result */}
         {result && (
           <div className="bg-white rounded-lg shadow-lg p-8">
@@ -263,6 +339,12 @@ export default function EmployerIssuerPage() {
                   <p className="text-sm text-gray-600">
                     <strong>Transaction Hash:</strong> {result.txHash}
                   </p>
+                </div>
+                <div className="mt-3">
+                  <details className="text-gray-500 text-sm">
+                    <summary>Response details</summary>
+                    <pre className="whitespace-pre-wrap break-all bg-white p-3 rounded border border-gray-200 mt-2">{JSON.stringify(result, null, 2)}</pre>
+                  </details>
                 </div>
               </div>
             )}

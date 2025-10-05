@@ -20,6 +20,16 @@ router.post(
 );
 
 /**
+ * @route   GET /api/v1/verification/verify/:credentialHash
+ * @desc    Public verify by credential hash (demo convenience)
+ * @access  Public
+ */
+router.get(
+  '/verify/:credentialHash',
+  verificationController.verifyByHash
+);
+
+/**
  * @route   GET /api/v1/verification/:id
  * @desc    Get verification details
  * @access  Private

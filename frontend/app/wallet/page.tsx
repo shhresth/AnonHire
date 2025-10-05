@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { ethers } from 'ethers';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount } from 'wagmi';
 import { FaArrowLeft, FaPlus, FaShieldAlt } from 'react-icons/fa';
@@ -20,39 +21,141 @@ export default function WalletPage() {
     setIsMounted(true);
   }, []);
 
-  const [credentials, setCredentials] = useState([
-    {
-      id: '1',
-      type: 'ACADEMIC',
-      issuer: 'MIT',
-      issuedAt: '2023-05-15',
-      status: 'active',
-      details: {
-        degree: 'Bachelor of Science in Computer Science',
-        gpa: '3.8',
-        graduationYear: '2023',
-        major: 'Computer Science'
-      }
-    },
-    {
-      id: '2',
-      type: 'JOB',
-      issuer: 'Google Inc.',
-      issuedAt: '2023-06-20',
-      status: 'active',
-      details: {
-        position: 'Software Engineer',
-        department: 'Engineering',
-        startDate: '2023-06-20',
-        endDate: 'Present',
-        responsibilities: 'Full-stack development, API design, and system architecture'
-      }
-    },
-  ]);
+  const [viewAddress, setViewAddress] = useState<string>('');
+  const [loadingList, setLoadingList] = useState(false);
+  const [credentials, setCredentials] = useState<any[]>([]);
+  const [authError, setAuthError] = useState<string | null>(null);
 
-  const handleViewCredential = (credential: any) => {
-    setSelectedCredential(credential);
-    setShowViewModal(true);
+  useEffect(() => {
+    if (isConnected && address && !viewAddress) {
+      setViewAddress(address);
+    }
+  }, [isConnected, address]);
+
+  async function ensureBackendAuth(): Promise<string | null> {
+    try {
+      const existing = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+      if (existing) return existing;
+
+      const eth: any = (window as any).ethereum;
+      if (!eth) { setAuthError('MetaMask not found.'); return null; }
+      const accounts: string[] = await eth.request({ method: 'eth_requestAccounts' });
+      const who = accounts[0];
+      if (!who) { setAuthError('No wallet connected.'); return null; }
+
+      const api = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001').replace(/\/$/, '');
+      const nonceRes = await fetch(`${api}/api/v1/auth/nonce/${who}`);
+      const nonceJson = await nonceRes.json();
+      const nonce = nonceJson?.nonce || nonceJson?.data?.nonce;
+      if (!nonce) { setAuthError('Failed to obtain nonce.'); return null; }
+
+      const provider = new ethers.BrowserProvider(eth);
+      const signer = await provider.getSigner();
+      const messageToSign = `Sign this message to login. Nonce: ${nonce}`;
+      const signature = await signer.signMessage(messageToSign);
+
+      const loginRes = await fetch(`${api}/api/v1/auth/login`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: who, signature, message: messageToSign })
+      });
+      const text = await loginRes.text();
+      let json: any = null; try { json = JSON.parse(text); } catch {}
+      const token = json?.token || json?.data?.token;
+      if (!loginRes.ok || !token) { setAuthError(json?.message || `Login failed (${loginRes.status}).`); return null; }
+      localStorage.setItem('token', token);
+      setAuthError(null);
+      return token;
+    } catch (e: any) {
+      setAuthError(e?.message || 'Authentication error');
+      return null;
+    }
+  }
+
+  const fetchCredentials = async (addr: string) => {
+    if (!addr) return;
+    setLoadingList(true);
+    try {
+      const api = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001').replace(/\/$/, '');
+      // Ensure we have backend JWT
+      let token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+      if (!token) {
+        token = await ensureBackendAuth();
+        if (!token) { setLoadingList(false); return; }
+      }
+      // Correct endpoint requires auth
+      const res = await fetch(`${api}/api/v1/credentials/subject/${addr}` , {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const text = await res.text();
+      let json: any = null; try { json = JSON.parse(text); } catch {}
+      const list = json?.data ?? [];
+      // Normalize a few fields for UI
+      const normalized = (list || []).map((c: any) => ({
+        id: c.id || c.credentialHash || Math.random().toString(36).slice(2),
+        type: c.credentialType || c.type || 'UNKNOWN',
+        issuer: c.issuer?.address || c.issuer || 'Unknown',
+        issuedAt: c.issuedAt ? new Date(c.issuedAt).toISOString().split('T')[0] : '',
+        status: c.isRevoked ? 'revoked' : 'active',
+        details: {},
+        credentialHash: c.credentialHash,
+        ipfsHash: c.ipfsHash,
+        txHash: c.txHash,
+      }));
+      setCredentials(normalized);
+    } catch (e) {
+      setCredentials([]);
+    } finally {
+      setLoadingList(false);
+    }
+  };
+
+  useEffect(() => {
+    if (viewAddress) fetchCredentials(viewAddress);
+  }, [viewAddress]);
+
+  const handleViewCredential = async (credential: any) => {
+    // Try to load decrypted details if this viewer is the subject (requires JWT)
+    try {
+      let enriched = { ...credential };
+      if (credential.id) {
+        // Ensure auth
+        let token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        if (!token) {
+          token = await ensureBackendAuth();
+        }
+        if (token) {
+          const api = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001').replace(/\/$/, '');
+          const res = await fetch(`${api}/api/v1/credentials/${credential.id}/decrypted`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          if (res.ok) {
+            const json = await res.json();
+            const data = json?.data;
+            if (data?.details) {
+              enriched = {
+                ...enriched,
+                details: {
+                  degree: data.details.degree,
+                  major: data.details.major,
+                  gpa: data.details.gpa,
+                  graduationYear: data.details.graduationYear,
+                  position: data.details.position,
+                  department: data.details.department,
+                  startDate: data.details.startDate,
+                  endDate: data.details.endDate,
+                  responsibilities: data.details.responsibilities,
+                },
+              };
+            }
+          }
+        }
+      }
+      setSelectedCredential(enriched);
+    } catch {
+      setSelectedCredential(credential);
+    } finally {
+      setShowViewModal(true);
+    }
   };
 
   const handleShareCredential = (credential: any) => {
@@ -137,6 +240,30 @@ export default function WalletPage() {
                   <p className="text-3xl font-bold text-blue-600">{credentials.length}</p>
                 </div>
               </div>
+              {authError && (
+                <div className="mt-3 bg-red-50 border border-red-200 text-red-700 p-3 rounded">{authError}</div>
+              )}
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="md:col-span-2">
+                  <label className="block text-sm text-gray-600 mb-1">View credentials for address</label>
+                  <input
+                    type="text"
+                    value={viewAddress}
+                    onChange={(e) => setViewAddress(e.target.value)}
+                    placeholder="0x..."
+                    className="w-full px-3 py-2 border rounded-lg"
+                  />
+                </div>
+                <div className="flex items-end">
+                  <button
+                    onClick={() => fetchCredentials(viewAddress)}
+                    className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300"
+                    disabled={!viewAddress || loadingList}
+                  >
+                    {loadingList ? 'Loading...' : 'Refresh'}
+                  </button>
+                </div>
+              </div>
             </div>
 
             {/* Credentials List */}
@@ -152,7 +279,9 @@ export default function WalletPage() {
                 </button>
               </div>
 
-              {credentials.length === 0 ? (
+              {loadingList ? (
+                <p className="text-center text-gray-600 py-8">Loading credentials...</p>
+              ) : credentials.length === 0 ? (
                 <p className="text-center text-gray-600 py-8">
                   No credentials yet. Request credentials from your university or employer.
                 </p>
@@ -199,7 +328,7 @@ export default function WalletPage() {
       {showAddModal && (
         <AddCredentialModal 
           onClose={() => setShowAddModal(false)}
-          onAdd={(credential) => {
+          onAdd={(credential: UICredential) => {
             setCredentials([...credentials, credential]);
             setShowAddModal(false);
           }}
@@ -239,7 +368,19 @@ export default function WalletPage() {
   );
 }
 
-function CredentialCard({ credential, onView, onShare }: any) {
+type UICredential = {
+  id: string;
+  type: string;
+  issuer: string;
+  issuedAt: string;
+  status: string;
+  details?: any;
+  credentialHash?: string;
+  ipfsHash?: string;
+  txHash?: string;
+};
+
+function CredentialCard({ credential, onView, onShare }: { credential: UICredential; onView: (c: UICredential)=>void; onShare: (c: UICredential)=>void; }) {
   return (
     <div className="bg-gradient-to-br from-blue-500 to-blue-700 text-white rounded-lg shadow-lg p-6 hover:shadow-xl transition-shadow">
       <div className="flex justify-between items-start mb-4">
@@ -250,6 +391,9 @@ function CredentialCard({ credential, onView, onShare }: any) {
       </div>
       <h4 className="text-xl font-bold mb-2">{credential.issuer}</h4>
       <p className="text-sm text-white/80">Issued: {credential.issuedAt}</p>
+      {credential.credentialHash && (
+        <p className="text-xs text-white/80 break-all mt-2">Hash: {credential.credentialHash}</p>
+      )}
       <div className="mt-4 flex space-x-2">
         <button 
           onClick={() => onView(credential)}

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { ethers } from 'ethers';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { FaGraduationCap, FaUserGraduate, FaCheck } from 'react-icons/fa';
 
@@ -16,6 +17,91 @@ export default function UniversityIssuerPage() {
   });
   const [isIssuing, setIsIssuing] = useState(false);
   const [result, setResult] = useState<any>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  async function ensureBackendAuth(): Promise<string | null> {
+    try {
+      const existing = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+      if (existing) return existing;
+
+      // Request wallet connection
+      const eth: any = (window as any).ethereum;
+      if (!eth) {
+        setAuthError('MetaMask not found. Please install or enable it.');
+        return null;
+      }
+      const accounts: string[] = await eth.request({ method: 'eth_requestAccounts' });
+      const issuerAddress = accounts[0];
+      if (!issuerAddress) {
+        setAuthError('No wallet connected.');
+        return null;
+      }
+
+      // 1) Get nonce
+      const nonceRes = await fetch(`http://localhost:3001/api/v1/auth/nonce/${issuerAddress}`);
+      const nonceJson = await nonceRes.json();
+      const nonce = nonceJson?.nonce || nonceJson?.data?.nonce;
+      if (!nonce) {
+        setAuthError('Failed to obtain nonce from backend.');
+        return null;
+      }
+
+      // 2) Sign nonce with a user-friendly message using ethers.js for compatibility
+      const provider = new ethers.BrowserProvider(eth);
+      const signer = await provider.getSigner();
+      const messageToSign = `Sign this message to login. Nonce: ${nonce}`;
+      const signature = await signer.signMessage(messageToSign);
+      if (!signature) {
+        setAuthError('Signature was not provided.');
+        return null;
+      }
+
+      // 3) Login and get JWT
+      const verifyRes = await fetch('http://localhost:3001/api/v1/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: issuerAddress, signature, message: messageToSign }),
+      });
+      const verifyText = await verifyRes.text();
+      let verifyJson: any = null;
+      try { verifyJson = JSON.parse(verifyText); } catch { /* not JSON */ }
+      const token = verifyJson?.token || verifyJson?.data?.token;
+      if (!verifyRes.ok || !token) {
+        // Auto-register if user not found, then retry login once
+        if (verifyRes.status === 404 && /User not found/i.test(verifyJson?.message || '')) {
+          const registerRes = await fetch('http://localhost:3001/api/v1/auth/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ address: issuerAddress, role: 'UNIVERSITY' }),
+          });
+          if (registerRes.ok) {
+            const retryLogin = await fetch('http://localhost:3001/api/v1/auth/login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ address: issuerAddress, signature, message: messageToSign }),
+            });
+            const retryText = await retryLogin.text();
+            let retryJson: any = null;
+            try { retryJson = JSON.parse(retryText); } catch {}
+            const retryToken = retryJson?.token || retryJson?.data?.token;
+            if (retryLogin.ok && retryToken) {
+              localStorage.setItem('token', retryToken);
+              setAuthError(null);
+              return retryToken;
+            }
+          }
+        }
+        setAuthError(verifyJson?.message || `Authentication failed (status ${verifyRes.status}). ${verifyText?.slice(0,200)}`);
+        return null;
+      }
+      localStorage.setItem('token', token);
+      setAuthError(null);
+      return token;
+    } catch (e: any) {
+      setAuthError(e?.message || 'Authentication error');
+      return null;
+    }
+  }
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setFormData({
@@ -29,20 +115,47 @@ export default function UniversityIssuerPage() {
     setIsIssuing(true);
     
     try {
+      // Ensure we have backend JWT before calling protected endpoint
+      let token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+      if (!token) {
+        token = await ensureBackendAuth();
+        if (!token) {
+          setIsIssuing(false);
+          return;
+        }
+      }
       const response = await fetch('http://localhost:3001/api/v1/credentials/academic', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
-          ...formData,
+          subjectAddress: formData.subjectAddress,
+          studentName: formData.studentName,
+          degree: formData.degree,
+          major: formData.major,
           gpa: parseFloat(formData.gpa),
           graduationYear: parseInt(formData.graduationYear),
+          // Backend expects institutionName
+          institutionName: formData.universityName,
         }),
       });
       
-      const result = await response.json();
-      setResult(result);
+      const text = await response.text();
+      let json: any = null;
+      try { json = JSON.parse(text); } catch { /* not JSON (likely HTML error) */ }
+      // Normalize response and surface errors clearly
+      if (!response.ok || json?.success === false) {
+        setResult({ error: (json?.message || `Failed to issue credential (status ${response.status})`), raw: json ?? text });
+      } else {
+        const payload = json?.data ?? json;
+        setResult({
+          credentialHash: payload?.credentialHash,
+          txHash: payload?.txHash,
+          ipfsHash: payload?.ipfsHash,
+        });
+      }
       
       if (response.ok) {
         // Reset form on success
@@ -174,7 +287,7 @@ export default function UniversityIssuerPage() {
                   onChange={handleInputChange}
                   placeholder="3.75"
                   min="0"
-                  max="4"
+                  max="10.00"
                   step="0.01"
                   required
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -237,6 +350,12 @@ export default function UniversityIssuerPage() {
         </div>
 
         {/* Result */}
+        {authError && (
+          <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded mb-6">
+            {authError}
+          </div>
+        )}
+
         {result && (
           <div className="bg-white rounded-lg shadow-lg p-8">
             <h3 className="text-2xl font-bold text-gray-900 mb-6">Result</h3>
@@ -254,11 +373,23 @@ export default function UniversityIssuerPage() {
                 </div>
                 <div className="bg-gray-50 p-4 rounded-lg">
                   <p className="text-sm text-gray-600">
-                    <strong>Credential Hash:</strong> {result.credentialHash}
+                    <strong>Credential Hash:</strong> {result?.credentialHash ?? '—'}
                   </p>
                   <p className="text-sm text-gray-600">
-                    <strong>Transaction Hash:</strong> {result.txHash}
+                    <strong>Transaction Hash:</strong> {result?.txHash ?? '—'}
                   </p>
+                  {result?.ipfsHash && (
+                    <p className="text-sm text-gray-600">
+                      <strong>IPFS CID:</strong> {result.ipfsHash}
+                    </p>
+                  )}
+                </div>
+                {/* Debug: raw response payload to help troubleshooting */}
+                <div className="mt-3">
+                  <details className="text-gray-500 text-sm">
+                    <summary>Response details</summary>
+                    <pre className="whitespace-pre-wrap break-all bg-white p-3 rounded border border-gray-200 mt-2">{JSON.stringify(result, null, 2)}</pre>
+                  </details>
                 </div>
               </div>
             )}
@@ -280,3 +411,4 @@ export default function UniversityIssuerPage() {
     </div>
   );
 }
+

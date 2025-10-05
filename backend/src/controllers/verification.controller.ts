@@ -83,6 +83,44 @@ export const verifyCredential = async (req: Request, res: Response, next: NextFu
     next(error);
   }
 };
+/**
+ * Public GET verify by hash (no auth) for quick testing
+ */
+export const verifyByHash = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { credentialHash } = req.params;
+
+    logger.info(`Public verify credential: ${credentialHash}`);
+
+    // DB record is ground-truth for issuance in this app
+    const credential = await prisma.credential.findUnique({ where: { credentialHash } });
+    const isRevokedDb = credential?.isRevoked ?? false;
+    // Best-effort chain revocation check
+    const isRevokedOnChain = await blockchainService.isRevoked(credentialHash);
+    // Consider valid if present in DB and not revoked (either source)
+    const isValid = !!(credential && !isRevokedDb && !isRevokedOnChain);
+
+    res.json({
+      success: true,
+      data: {
+        isValid,
+        isRevokedDb,
+        isRevokedOnChain,
+        credential: credential ? {
+          credentialHash,
+          ipfsHash: credential.ipfsHash,
+          txHash: credential.txHash,
+          type: credential.credentialType,
+          issuedAt: credential.issuedAt,
+          expiresAt: credential.expiresAt,
+        } : null,
+      }
+    });
+  } catch (error: any) {
+    logger.error('Error public verify:', error);
+    next(error);
+  }
+};
 
 /**
  * Get verification details

@@ -494,6 +494,70 @@ export const getCredentialFromIPFS = async (
 };
 
 /**
+ * Get decrypted credential data (subject-only)
+ * GET /api/v1/credentials/:id/decrypted
+ */
+export const getDecryptedCredential = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const { id } = req.params;
+
+    const credential = await prisma.credential.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        encryptedData: true,
+        credentialType: true,
+        issuedAt: true,
+        expiresAt: true,
+        issuer: { select: { address: true, did: true } },
+        subjectId: true,
+      },
+    });
+
+    if (!credential) {
+      res.status(404).json({ success: false, message: 'Credential not found' });
+      return;
+    }
+
+    // Allow only the subject (owner) to read decrypted content
+    const requesterId = (req as any).user.id;
+    if (credential.subjectId !== requesterId) {
+      res.status(403).json({ success: false, message: 'Not authorized to view this credential' });
+      return;
+    }
+
+    // Decrypt
+    const plaintext = encryptionService.decrypt(credential.encryptedData || '');
+    let parsed: any = null;
+    try {
+      parsed = JSON.parse(plaintext);
+    } catch {
+      parsed = { raw: plaintext };
+    }
+
+    res.json({
+      success: true,
+      data: {
+        id: credential.id,
+        type: credential.credentialType,
+        issuedAt: credential.issuedAt,
+        expiresAt: credential.expiresAt,
+        issuer: credential.issuer,
+        details: parsed?.credentialSubject || parsed,
+        full: parsed,
+      },
+    });
+  } catch (error: any) {
+    logger.error('Error getting decrypted credential:', error);
+    next(error);
+  }
+};
+
+/**
  * Helper function to get user ID by address
  */
 async function getUserIdByAddress(address: string): Promise<string> {

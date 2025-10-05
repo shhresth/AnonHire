@@ -20,7 +20,7 @@ router.post(
     body('studentName').notEmpty().withMessage('Student name is required'),
     body('degree').notEmpty().withMessage('Degree is required'),
     body('major').notEmpty().withMessage('Major is required'),
-    body('gpa').isFloat({ min: 0, max: 4 }).withMessage('Invalid GPA'),
+    body('gpa').isFloat({ min: 0, max: 10 }).withMessage('Invalid GPA (expected 0–10)'),
     body('graduationYear').isInt({ min: 1900, max: 2100 }).withMessage('Invalid year'),
     body('expiresAt').optional().isISO8601().withMessage('Invalid expiration date')
   ],
@@ -113,6 +113,13 @@ router.get('/issuer/:address', authenticate, credentialController.getIssuerCrede
  * @access  Private
  */
 router.get('/:id/ipfs', authenticate, credentialController.getCredentialFromIPFS);
+
+/**
+ * @route   GET /api/v1/credentials/:id/decrypted
+ * @desc    Get decrypted credential (subject-only)
+ * @access  Private (Subject)
+ */
+router.get('/:id/decrypted', authenticate, credentialController.getDecryptedCredential);
 
 export default router;
 
