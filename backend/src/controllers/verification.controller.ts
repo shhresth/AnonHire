@@ -1,10 +1,12 @@
 import { Request, Response, NextFunction } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { BlockchainService } from '../services/blockchain.service';
+import { IPFSService } from '../services/ipfs.service';
 import { logger } from '../utils/logger';
 
 const prisma = new PrismaClient();
 const blockchainService = new BlockchainService();
+const ipfsService = new IPFSService();
 
 /**
  * Verify a credential
@@ -100,6 +102,22 @@ export const verifyByHash = async (req: Request, res: Response, next: NextFuncti
     // Consider valid if present in DB and not revoked (either source)
     const isValid = !!(credential && !isRevokedDb && !isRevokedOnChain);
 
+    // Try to enrich with public summary from IPFS (non-sensitive)
+    let publicSummary: any = null;
+    if (credential?.ipfsHash) {
+      try {
+        const ipfsJson = await ipfsService.getJSON(credential.ipfsHash);
+        if (ipfsJson && typeof ipfsJson === 'object') {
+          publicSummary = ipfsJson.publicSummary || null;
+        }
+      } catch (e) {
+        // best-effort only
+      }
+    }
+
+    // Build a readable statement for verifiers
+    const statement = credential ? `This verifies a ${credential.credentialType} credential issued by ${credential.issuerId ? 'the issuer' : 'an issuer'} on ${credential.issuedAt?.toISOString?.() ?? credential.issuedAt}` : null;
+
     res.json({
       success: true,
       data: {
@@ -113,6 +131,8 @@ export const verifyByHash = async (req: Request, res: Response, next: NextFuncti
           type: credential.credentialType,
           issuedAt: credential.issuedAt,
           expiresAt: credential.expiresAt,
+          publicSummary,
+          statement,
         } : null,
       }
     });

@@ -3,9 +3,13 @@
 import { useState } from 'react';
 import { ethers } from 'ethers';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { FaGraduationCap, FaUserGraduate, FaCheck } from 'react-icons/fa';
+import { FaGraduationCap, FaUserGraduate, FaCheck, FaArrowLeft } from 'react-icons/fa';
+import Link from 'next/link';
+import TopNav from '@/components/TopNav';
+import { useToast } from '@/components/Toast';
 
 export default function UniversityIssuerPage() {
+  const { showToast } = useToast();
   const [formData, setFormData] = useState({
     subjectAddress: '',
     studentName: '',
@@ -180,15 +184,7 @@ export default function UniversityIssuerPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
       {/* Header */}
-      <header className="bg-white shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
-          <div className="flex items-center space-x-2">
-            <FaGraduationCap className="text-blue-600 text-3xl" />
-            <h1 className="text-2xl font-bold text-gray-900">AnonHire - University Issuer</h1>
-          </div>
-          <ConnectButton />
-        </div>
-      </header>
+      <TopNav title="AnonHire - University Issuer" accent="blue" />
 
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <div className="text-center mb-12">
@@ -374,13 +370,32 @@ export default function UniversityIssuerPage() {
                 <div className="bg-gray-50 p-4 rounded-lg">
                   <p className="text-sm text-gray-600">
                     <strong>Credential Hash:</strong> {result?.credentialHash ?? '—'}
+                    {result?.credentialHash && (
+                      <button
+                        type="button"
+                        onClick={() => { navigator.clipboard.writeText(result.credentialHash); showToast('Credential hash copied', 'success'); }}
+                        className="ml-2 px-2 py-1 text-xs border rounded hover:bg-gray-50"
+                      >Copy</button>
+                    )}
                   </p>
                   <p className="text-sm text-gray-600">
                     <strong>Transaction Hash:</strong> {result?.txHash ?? '—'}
+                    {result?.txHash && (
+                      <button
+                        type="button"
+                        onClick={() => { navigator.clipboard.writeText(result.txHash); showToast('Transaction hash copied', 'success'); }}
+                        className="ml-2 px-2 py-1 text-xs border rounded hover:bg-gray-50"
+                      >Copy</button>
+                    )}
                   </p>
                   {result?.ipfsHash && (
                     <p className="text-sm text-gray-600">
                       <strong>IPFS CID:</strong> {result.ipfsHash}
+                      <button
+                        type="button"
+                        onClick={() => { navigator.clipboard.writeText(result.ipfsHash); showToast('IPFS CID copied', 'success'); }}
+                        className="ml-2 px-2 py-1 text-xs border rounded hover:bg-gray-50"
+                      >Copy</button>
                     </p>
                   )}
                 </div>

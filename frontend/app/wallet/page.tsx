@@ -6,6 +6,7 @@ import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount } from 'wagmi';
 import { FaArrowLeft, FaPlus, FaShieldAlt } from 'react-icons/fa';
 import Link from 'next/link';
+import TopNav from '@/components/TopNav';
 
 export default function WalletPage() {
   const { address, isConnected } = useAccount();
@@ -32,16 +33,23 @@ export default function WalletPage() {
     }
   }, [isConnected, address]);
 
-  async function ensureBackendAuth(): Promise<string | null> {
+  async function ensureBackendAuth(expectedAddress?: string): Promise<string | null> {
     try {
       const existing = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-      if (existing) return existing;
+      const existingAddr = typeof window !== 'undefined' ? localStorage.getItem('tokenAddress') : null;
+      if (existing && (!expectedAddress || (existingAddr && existingAddr.toLowerCase() === expectedAddress.toLowerCase()))) {
+        return existing;
+      }
 
       const eth: any = (window as any).ethereum;
       if (!eth) { setAuthError('MetaMask not found.'); return null; }
       const accounts: string[] = await eth.request({ method: 'eth_requestAccounts' });
       const who = accounts[0];
       if (!who) { setAuthError('No wallet connected.'); return null; }
+      if (expectedAddress && who.toLowerCase() !== expectedAddress.toLowerCase()) {
+        setAuthError('Please switch MetaMask to the correct wallet for this action.');
+        return null;
+      }
 
       const api = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001').replace(/\/$/, '');
       const nonceRes = await fetch(`${api}/api/v1/auth/nonce/${who}`);
@@ -63,6 +71,7 @@ export default function WalletPage() {
       const token = json?.token || json?.data?.token;
       if (!loginRes.ok || !token) { setAuthError(json?.message || `Login failed (${loginRes.status}).`); return null; }
       localStorage.setItem('token', token);
+      localStorage.setItem('tokenAddress', who);
       setAuthError(null);
       return token;
     } catch (e: any) {
@@ -92,6 +101,7 @@ export default function WalletPage() {
       // Normalize a few fields for UI
       const normalized = (list || []).map((c: any) => ({
         id: c.id || c.credentialHash || Math.random().toString(36).slice(2),
+        dbId: c.id || null,
         type: c.credentialType || c.type || 'UNKNOWN',
         issuer: c.issuer?.address || c.issuer || 'Unknown',
         issuedAt: c.issuedAt ? new Date(c.issuedAt).toISOString().split('T')[0] : '',
@@ -113,49 +123,11 @@ export default function WalletPage() {
     if (viewAddress) fetchCredentials(viewAddress);
   }, [viewAddress]);
 
-  const handleViewCredential = async (credential: any) => {
-    // Try to load decrypted details if this viewer is the subject (requires JWT)
-    try {
-      let enriched = { ...credential };
-      if (credential.id) {
-        // Ensure auth
-        let token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-        if (!token) {
-          token = await ensureBackendAuth();
-        }
-        if (token) {
-          const api = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001').replace(/\/$/, '');
-          const res = await fetch(`${api}/api/v1/credentials/${credential.id}/decrypted`, {
-            headers: { Authorization: `Bearer ${token}` }
-          });
-          if (res.ok) {
-            const json = await res.json();
-            const data = json?.data;
-            if (data?.details) {
-              enriched = {
-                ...enriched,
-                details: {
-                  degree: data.details.degree,
-                  major: data.details.major,
-                  gpa: data.details.gpa,
-                  graduationYear: data.details.graduationYear,
-                  position: data.details.position,
-                  department: data.details.department,
-                  startDate: data.details.startDate,
-                  endDate: data.details.endDate,
-                  responsibilities: data.details.responsibilities,
-                },
-              };
-            }
-          }
-        }
-      }
-      setSelectedCredential(enriched);
-    } catch {
-      setSelectedCredential(credential);
-    } finally {
-      setShowViewModal(true);
-    }
+  const handleViewCredential = (credential: any) => {
+    // mark if the decrypt call should be allowed (owner viewing own wallet)
+    const canDecrypt = viewAddress && address && viewAddress.toLowerCase() === address.toLowerCase();
+    setSelectedCredential({ ...credential, canDecrypt });
+    setShowViewModal(true);
   };
 
   const handleShareCredential = (credential: any) => {
@@ -198,20 +170,7 @@ export default function WalletPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
       {/* Header */}
-      <header className="bg-white shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
-          <div className="flex items-center space-x-4">
-            <Link href="/" className="text-blue-600 hover:text-blue-700">
-              <FaArrowLeft className="text-2xl" />
-            </Link>
-            <div className="flex items-center space-x-2">
-              <FaShieldAlt className="text-blue-600 text-3xl" />
-              <h1 className="text-2xl font-bold text-gray-900">My Wallet</h1>
-            </div>
-          </div>
-          <ConnectButton />
-        </div>
-      </header>
+      <TopNav title="My Wallet" accent="blue" />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {!isConnected ? (
@@ -282,9 +241,11 @@ export default function WalletPage() {
               {loadingList ? (
                 <p className="text-center text-gray-600 py-8">Loading credentials...</p>
               ) : credentials.length === 0 ? (
-                <p className="text-center text-gray-600 py-8">
-                  No credentials yet. Request credentials from your university or employer.
-                </p>
+                <div className="text-center text-gray-600 py-12">
+                  <div className="mx-auto w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3">🎓</div>
+                  <p className="mb-1">No credentials yet.</p>
+                  <p className="text-sm">Ask your issuer to create one, or visit the issuer pages.</p>
+                </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {credentials.map((cred) => (
@@ -358,6 +319,8 @@ export default function WalletPage() {
       {showViewModal && selectedCredential && (
         <ViewCredentialModal 
           credential={selectedCredential}
+          getToken={ensureBackendAuth}
+          expectedAddress={address}
           onClose={() => {
             setShowViewModal(false);
             setSelectedCredential(null);
@@ -745,28 +708,66 @@ function HistoryModal({ onClose }: any) {
 }
 
 // View Credential Modal
-function ViewCredentialModal({ credential, onClose }: any) {
+function ViewCredentialModal({ credential, onClose, getToken, expectedAddress }: any) {
+  const [loadingDetails, setLoadingDetails] = useState(false);
+  const [detailsError, setDetailsError] = useState<string | null>(null);
+  const [decrypted, setDecrypted] = useState<any>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      // Only attempt decrypt for owner and when we have a real DB id
+      if (!credential?.canDecrypt) return;
+      const dbId = credential.dbId || credential.id;
+      if (!dbId || (typeof dbId === 'string' && dbId.startsWith('0x'))) return;
+      setLoadingDetails(true);
+      setDetailsError(null);
+      try {
+        const api = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001').replace(/\/$/, '');
+        const token = await getToken?.(expectedAddress);
+        if (!token) { setDetailsError('Not authenticated'); return; }
+        const res = await fetch(`${api}/api/v1/credentials/${dbId}/decrypted`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const text = await res.text();
+        let json: any = null; try { json = JSON.parse(text); } catch {}
+        if (!res.ok) {
+          setDetailsError(json?.message || `Failed to load details (${res.status})`);
+          return;
+        }
+        if (!cancelled) setDecrypted(json?.data);
+      } catch (e: any) {
+        if (!cancelled) setDetailsError(e?.message || 'Failed to load details');
+      } finally {
+        if (!cancelled) setLoadingDetails(false);
+      }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [credential?.id]);
+
+  const effectiveDetails = decrypted?.details || credential.details;
   const renderCredentialDetails = () => {
-    if (!credential.details) return null;
+    if (!effectiveDetails) return null;
 
     if (credential.type === 'ACADEMIC') {
       return (
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Degree</label>
-            <p className="text-gray-900">{credential.details.degree}</p>
+            <p className="text-gray-900">{effectiveDetails.degree}</p>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Major</label>
-            <p className="text-gray-900">{credential.details.major}</p>
+            <p className="text-gray-900">{effectiveDetails.major}</p>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">GPA</label>
-            <p className="text-gray-900">{credential.details.gpa}</p>
+            <p className="text-gray-900">{effectiveDetails.gpa}</p>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Graduation Year</label>
-            <p className="text-gray-900">{credential.details.graduationYear}</p>
+            <p className="text-gray-900">{effectiveDetails.graduationYear}</p>
           </div>
         </div>
       );
@@ -775,23 +776,23 @@ function ViewCredentialModal({ credential, onClose }: any) {
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Position</label>
-            <p className="text-gray-900">{credential.details.position}</p>
+            <p className="text-gray-900">{effectiveDetails.position}</p>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
-            <p className="text-gray-900">{credential.details.department}</p>
+            <p className="text-gray-900">{effectiveDetails.department}</p>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
-            <p className="text-gray-900">{credential.details.startDate}</p>
+            <p className="text-gray-900">{effectiveDetails.startDate}</p>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
-            <p className="text-gray-900">{credential.details.endDate}</p>
+            <p className="text-gray-900">{effectiveDetails.endDate}</p>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Responsibilities</label>
-            <p className="text-gray-900">{credential.details.responsibilities}</p>
+            <p className="text-gray-900">{effectiveDetails.responsibilities}</p>
           </div>
         </div>
       );
@@ -835,14 +836,75 @@ function ViewCredentialModal({ credential, onClose }: any) {
                   {credential.status}
                 </span>
               </div>
+              {credential.credentialHash && (
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Credential Hash</label>
+                  <p className="text-gray-900 break-all">{credential.credentialHash}</p>
+                </div>
+              )}
+              {credential.txHash && (
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Transaction Hash</label>
+                  <p className="text-gray-900 break-all">{credential.txHash}</p>
+                </div>
+              )}
+              {credential.ipfsHash && (
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">IPFS CID</label>
+                  <p className="text-gray-900 break-all">{credential.ipfsHash}</p>
+                </div>
+              )}
             </div>
           </div>
 
           {/* Detailed Information */}
-          {credential.details && (
+          {(effectiveDetails || loadingDetails || detailsError || !credential.canDecrypt) && (
             <div className="bg-gray-50 p-4 rounded-lg">
               <h4 className="text-lg font-semibold mb-3 text-gray-900">Detailed Information</h4>
-              {renderCredentialDetails()}
+              {!credential.canDecrypt && (
+                <p className="text-sm text-gray-600">You can only view details when viewing your own wallet.</p>
+              )}
+              {credential.canDecrypt && loadingDetails && (
+                <p className="text-sm text-gray-600">Loading details...</p>
+              )}
+              {credential.canDecrypt && detailsError && (
+                <div className="text-sm text-red-600 space-y-2">
+                  <p>{detailsError}</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      try { localStorage.removeItem('token'); localStorage.removeItem('tokenAddress'); } catch {}
+                      // trigger reload
+                      setDetailsError(null);
+                      setLoadingDetails(true);
+                      // simple re-run: change dependency by calling a no-op then re-run load via effect
+                      // Easiest: directly call the loader again
+                      (async () => {
+                        try {
+                          const api = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001').replace(/\/$/, '');
+                          const dbId = credential.dbId || credential.id;
+                          const token = await getToken?.(expectedAddress);
+                          if (!token) { setDetailsError('Not authenticated'); return; }
+                          const res = await fetch(`${api}/api/v1/credentials/${dbId}/decrypted`, { headers: { Authorization: `Bearer ${token}` } });
+                          const text = await res.text();
+                          let json: any = null; try { json = JSON.parse(text); } catch {}
+                          if (!res.ok) { setDetailsError(json?.message || `Failed to load details (${res.status})`); return; }
+                          setDecrypted(json?.data);
+                          setDetailsError(null);
+                        } catch (e: any) {
+                          setDetailsError(e?.message || 'Failed to load details');
+                        } finally {
+                          setLoadingDetails(false);
+                        }
+                      })();
+                    }}
+                    className="px-3 py-1 border rounded text-gray-700 hover:bg-gray-50"
+                  >
+                    Re-authenticate and retry
+                  </button>
+                </div>
+              )}
+              {credential.canDecrypt && !loadingDetails && !detailsError && renderCredentialDetails()}
             </div>
           )}
 

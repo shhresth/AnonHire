@@ -1,13 +1,17 @@
 'use client';
 
 import { useState } from 'react';
+import { useToast } from '@/components/Toast';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { FaCheck, FaTimes, FaSearch, FaShieldAlt } from 'react-icons/fa';
+import { FaCheck, FaTimes, FaSearch, FaShieldAlt, FaArrowLeft } from 'react-icons/fa';
+import Link from 'next/link';
+import TopNav from '@/components/TopNav';
 
 export default function VerifierPage() {
   const [credentialHash, setCredentialHash] = useState('');
   const [verificationResult, setVerificationResult] = useState<any>(null);
   const [isVerifying, setIsVerifying] = useState(false);
+  const { showToast } = useToast();
 
   const handleVerify = async () => {
     if (!credentialHash) return;
@@ -34,15 +38,7 @@ export default function VerifierPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
       {/* Header */}
-      <header className="bg-white shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
-          <div className="flex items-center space-x-2">
-            <FaShieldAlt className="text-blue-600 text-3xl" />
-            <h1 className="text-2xl font-bold text-gray-900">AnonHire - Verifier</h1>
-          </div>
-          <ConnectButton />
-        </div>
-      </header>
+      <TopNav title="AnonHire - Verifier" accent="blue" />
 
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <div className="text-center mb-12">
@@ -117,15 +113,46 @@ export default function VerifierPage() {
                   <div className="bg-gray-50 p-4 rounded-lg">
                     <h4 className="font-semibold text-gray-900 mb-2">Credential Details</h4>
                     <p className="text-sm text-gray-600"><strong>Type:</strong> {verificationResult?.data?.credential?.type ?? 'N/A'}</p>
+                    {verificationResult?.data?.credential?.statement && (
+                      <p className="text-sm text-gray-700 mt-1">{verificationResult.data.credential.statement}</p>
+                    )}
                     <p className="text-sm text-gray-600"><strong>Issued:</strong> {verificationResult?.data?.credential?.issuedAt ? new Date(verificationResult.data.credential.issuedAt).toLocaleDateString() : 'N/A'}</p>
                     <p className="text-sm text-gray-600"><strong>Status:</strong> {(verificationResult?.data?.isRevokedDb || verificationResult?.data?.isRevokedOnChain) ? 'Revoked' : 'Active'}</p>
-                    <p className="text-sm text-gray-600 break-all"><strong>Credential Hash:</strong> {verificationResult?.data?.credential?.credentialHash ?? credentialHash}</p>
+                    <p className="text-sm text-gray-600 break-all flex items-center space-x-2">
+                      <strong>Credential Hash:</strong>
+                      <span>{verificationResult?.data?.credential?.credentialHash ?? credentialHash}</span>
+                      <button
+                        type="button"
+                        onClick={() => { navigator.clipboard.writeText(verificationResult?.data?.credential?.credentialHash ?? credentialHash); showToast('Credential hash copied', 'success'); }}
+                        className="px-2 py-1 text-xs border rounded hover:bg-gray-50"
+                      >Copy</button>
+                    </p>
                   </div>
                   
                   <div className="bg-gray-50 p-4 rounded-lg">
                     <h4 className="font-semibold text-gray-900 mb-2">Blockchain Info</h4>
-                    <p className="text-sm text-gray-600 break-all"><strong>Transaction:</strong> {verificationResult?.data?.credential?.txHash ?? 'N/A'}</p>
-                    <p className="text-sm text-gray-600 break-all"><strong>IPFS CID:</strong> {verificationResult?.data?.credential?.ipfsHash ?? 'N/A'}</p>
+                    <p className="text-sm text-gray-600 break-all flex items-center space-x-2">
+                      <strong>Transaction:</strong>
+                      <span>{verificationResult?.data?.credential?.txHash ?? 'N/A'}</span>
+                      {verificationResult?.data?.credential?.txHash && (
+                        <button
+                          type="button"
+                          onClick={() => { navigator.clipboard.writeText(verificationResult.data.credential.txHash); showToast('Transaction hash copied', 'success'); }}
+                          className="px-2 py-1 text-xs border rounded hover:bg-gray-50"
+                        >Copy</button>
+                      )}
+                    </p>
+                    <p className="text-sm text-gray-600 break-all flex items-center space-x-2">
+                      <strong>IPFS CID:</strong>
+                      <span>{verificationResult?.data?.credential?.ipfsHash ?? 'N/A'}</span>
+                      {verificationResult?.data?.credential?.ipfsHash && (
+                        <button
+                          type="button"
+                          onClick={() => { navigator.clipboard.writeText(verificationResult.data.credential.ipfsHash); showToast('IPFS CID copied', 'success'); }}
+                          className="px-2 py-1 text-xs border rounded hover:bg-gray-50"
+                        >Copy</button>
+                      )}
+                    </p>
                     <p className="text-sm text-gray-600">
                       <strong>Verified:</strong> {new Date().toLocaleString()}
                     </p>
