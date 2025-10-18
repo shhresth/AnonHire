@@ -8,15 +8,45 @@ const router = Router();
 
 /**
  * @route   POST /api/v1/verification/verify
- * @desc    Verify a credential
+ * @desc    Verify a credential with optional parameters
  * @access  Private
  */
 router.post(
   '/verify',
   authenticate,
-  [body('credentialHash').notEmpty().withMessage('Credential hash is required')],
+  [
+    body('credentialHash').notEmpty().withMessage('Credential hash is required'),
+    body('verificationParams').optional().isObject().withMessage('Verification parameters must be an object'),
+    body('verificationParams.minGpa').optional().isNumeric().withMessage('Minimum GPA must be a number'),
+    body('verificationParams.requiredDegree').optional().isString().withMessage('Required degree must be a string'),
+    body('verificationParams.requiredMajor').optional().isString().withMessage('Required major must be a string'),
+    body('verificationParams.minGraduationYear').optional().isInt().withMessage('Minimum graduation year must be an integer'),
+    body('verificationParams.minExperience').optional().isInt().withMessage('Minimum experience must be an integer'),
+    body('verificationParams.requiredSkills').optional().isArray().withMessage('Required skills must be an array'),
+  ],
   validate,
   verificationController.verifyCredential
+);
+
+/**
+ * @route   POST /api/v1/verification/verify-with-params
+ * @desc    Verify a credential with parameters (public endpoint for demo)
+ * @access  Public
+ */
+router.post(
+  '/verify-with-params',
+  [
+    body('credentialHash').notEmpty().withMessage('Credential hash is required'),
+    body('verificationParams').isObject().withMessage('Verification parameters are required'),
+    body('verificationParams.minGpa').optional().isNumeric().withMessage('Minimum GPA must be a number'),
+    body('verificationParams.requiredDegree').optional().isString().withMessage('Required degree must be a string'),
+    body('verificationParams.requiredMajor').optional().isString().withMessage('Required major must be a string'),
+    body('verificationParams.minGraduationYear').optional().isInt().withMessage('Minimum graduation year must be an integer'),
+    body('verificationParams.minExperience').optional().isInt().withMessage('Minimum experience must be an integer'),
+    body('verificationParams.requiredSkills').optional().isArray().withMessage('Required skills must be an array'),
+  ],
+  validate,
+  verificationController.verifyCredentialWithParams
 );
 
 /**

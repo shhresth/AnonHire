@@ -4,7 +4,8 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import dotenv from 'dotenv';
 import { errorHandler } from './middleware/errorHandler';
-import { logger } from './utils/logger';
+import { requestLogger, securityLogger } from './middleware/requestLogger';
+import { logger, logAudit } from './utils/logger';
 import routes from './routes';
 
 // Load environment variables
@@ -21,6 +22,10 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Enhanced logging middleware
+app.use(securityLogger);
+app.use(requestLogger);
 app.use(morgan('combined', { stream: { write: (message) => logger.info(message.trim()) } }));
 
 // Health check
@@ -42,6 +47,11 @@ app.use(errorHandler);
 app.listen(PORT, () => {
   logger.info(`Server running on port ${PORT}`);
   logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  logAudit('Server Started', undefined, {
+    port: PORT,
+    environment: process.env.NODE_ENV || 'development',
+    timestamp: new Date().toISOString()
+  });
 });
 
 // Graceful shutdown

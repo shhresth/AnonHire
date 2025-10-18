@@ -573,6 +573,53 @@ export const getDecryptedCredential = async (
 };
 
 /**
+ * Get all revoked credentials
+ */
+export const getRevokedCredentials = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    logger.info('Getting all revoked credentials');
+
+    // Get all revoked credentials from database
+    const revokedCredentials = await prisma.credential.findMany({
+      where: {
+        isRevoked: true,
+      },
+      include: {
+        issuer: true,
+        subject: true,
+      },
+      orderBy: {
+        revokedAt: 'desc',
+      },
+    });
+
+    // Format the response
+    const formattedCredentials = revokedCredentials.map(credential => ({
+      id: credential.id,
+      credentialHash: credential.credentialHash,
+      credentialType: credential.credentialType,
+      issuer: credential.issuer.address,
+      subject: credential.subject.address,
+      revokedAt: credential.revokedAt,
+      revocationReason: credential.revocationReason,
+      txHash: credential.txHash,
+    }));
+
+    res.json({
+      success: true,
+      data: formattedCredentials,
+    });
+  } catch (error: any) {
+    logger.error('Error getting revoked credentials:', error);
+    next(error);
+  }
+};
+
+/**
  * Helper function to get user ID by address
  */
 async function getUserIdByAddress(address: string): Promise<string> {

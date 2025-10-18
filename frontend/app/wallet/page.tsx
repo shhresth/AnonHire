@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount } from 'wagmi';
-import { FaArrowLeft, FaPlus, FaShieldAlt } from 'react-icons/fa';
+import { FaArrowLeft, FaPlus, FaShieldAlt, FaGraduationCap, FaBriefcase, FaUserTie, FaCopy, FaExternalLinkAlt, FaCheckCircle, FaExclamationTriangle, FaClock } from 'react-icons/fa';
 import Link from 'next/link';
 import TopNav from '@/components/TopNav';
 
@@ -344,31 +344,150 @@ type UICredential = {
 };
 
 function CredentialCard({ credential, onView, onShare }: { credential: UICredential; onView: (c: UICredential)=>void; onShare: (c: UICredential)=>void; }) {
+  const getCredentialIcon = (type: string) => {
+    switch (type) {
+      case 'ACADEMIC':
+        return <FaGraduationCap className="text-blue-600" />;
+      case 'JOB':
+        return <FaBriefcase className="text-green-600" />;
+      case 'INTERNSHIP':
+        return <FaUserTie className="text-purple-600" />;
+      default:
+        return <FaShieldAlt className="text-gray-600" />;
+    }
+  };
+
+  const getCredentialColor = (type: string) => {
+    switch (type) {
+      case 'ACADEMIC':
+        return 'from-blue-500 to-blue-700';
+      case 'JOB':
+        return 'from-green-500 to-green-700';
+      case 'INTERNSHIP':
+        return 'from-purple-500 to-purple-700';
+      default:
+        return 'from-gray-500 to-gray-700';
+    }
+  };
+
+  const getStatusIcon = (status: string) => {
+    switch (status.toLowerCase()) {
+      case 'active':
+        return <FaCheckCircle className="text-green-400" />;
+      case 'expired':
+        return <FaExclamationTriangle className="text-yellow-400" />;
+      case 'revoked':
+        return <FaExclamationTriangle className="text-red-400" />;
+      default:
+        return <FaClock className="text-gray-400" />;
+    }
+  };
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
+  };
+
+  const copyToClipboard = (text: string, label: string) => {
+    navigator.clipboard.writeText(text);
+    // You could add a toast notification here
+  };
+
   return (
-    <div className="bg-gradient-to-br from-blue-500 to-blue-700 text-white rounded-lg shadow-lg p-6 hover:shadow-xl transition-shadow">
+    <div className={`bg-gradient-to-br ${getCredentialColor(credential.type)} text-white rounded-xl shadow-lg p-6 hover:shadow-xl transition-all hover:scale-105`}>
+      {/* Header */}
       <div className="flex justify-between items-start mb-4">
-        <span className="bg-white/20 px-3 py-1 rounded-full text-sm">
-          {credential.type}
-        </span>
-        <span className="text-xs">{credential.status}</span>
+        <div className="flex items-center space-x-2">
+          <div className="bg-white/20 p-2 rounded-lg">
+            {getCredentialIcon(credential.type)}
+          </div>
+          <span className="bg-white/20 px-3 py-1 rounded-full text-sm font-medium">
+            {credential.type}
+          </span>
+        </div>
+        <div className="flex items-center space-x-1">
+          {getStatusIcon(credential.status)}
+          <span className="text-xs font-medium">{credential.status}</span>
+        </div>
       </div>
-      <h4 className="text-xl font-bold mb-2">{credential.issuer}</h4>
-      <p className="text-sm text-white/80">Issued: {credential.issuedAt}</p>
-      {credential.credentialHash && (
-        <p className="text-xs text-white/80 break-all mt-2">Hash: {credential.credentialHash}</p>
-      )}
-      <div className="mt-4 flex space-x-2">
+
+      {/* Content */}
+      <div className="mb-4">
+        <h4 className="text-lg font-bold mb-1 truncate">{credential.issuer}</h4>
+        <p className="text-sm text-white/80">Issued: {formatDate(credential.issuedAt)}</p>
+        
+        {/* Credential Hash */}
+        {credential.credentialHash && (
+          <div className="mt-3 p-2 bg-white/10 rounded-lg">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-white/70">Credential Hash:</span>
+              <button
+                onClick={() => copyToClipboard(credential.credentialHash, 'Credential Hash')}
+                className="text-white/70 hover:text-white transition-colors"
+              >
+                <FaCopy className="text-xs" />
+              </button>
+            </div>
+            <p className="text-xs font-mono text-white/90 break-all mt-1">
+              {credential.credentialHash.slice(0, 12)}...{credential.credentialHash.slice(-8)}
+            </p>
+          </div>
+        )}
+
+        {/* Transaction Hash */}
+        {credential.txHash && (
+          <div className="mt-2 p-2 bg-white/10 rounded-lg">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-white/70">Transaction:</span>
+              <button
+                onClick={() => copyToClipboard(credential.txHash, 'Transaction Hash')}
+                className="text-white/70 hover:text-white transition-colors"
+              >
+                <FaCopy className="text-xs" />
+              </button>
+            </div>
+            <p className="text-xs font-mono text-white/90 break-all mt-1">
+              {credential.txHash.slice(0, 12)}...{credential.txHash.slice(-8)}
+            </p>
+          </div>
+        )}
+
+        {/* IPFS Hash */}
+        {credential.ipfsHash && (
+          <div className="mt-2 p-2 bg-white/10 rounded-lg">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-white/70">IPFS CID:</span>
+              <button
+                onClick={() => copyToClipboard(credential.ipfsHash, 'IPFS CID')}
+                className="text-white/70 hover:text-white transition-colors"
+              >
+                <FaCopy className="text-xs" />
+              </button>
+            </div>
+            <p className="text-xs font-mono text-white/90 break-all mt-1">
+              {credential.ipfsHash.slice(0, 12)}...{credential.ipfsHash.slice(-8)}
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Actions */}
+      <div className="flex space-x-2">
         <button 
           onClick={() => onView(credential)}
-          className="flex-1 bg-white/20 hover:bg-white/30 px-4 py-2 rounded text-sm transition-colors"
+          className="flex-1 bg-white/20 hover:bg-white/30 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center space-x-2"
         >
-          View
+          <span>View Details</span>
         </button>
         <button 
           onClick={() => onShare(credential)}
-          className="flex-1 bg-white/20 hover:bg-white/30 px-4 py-2 rounded text-sm transition-colors"
+          className="flex-1 bg-white/20 hover:bg-white/30 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center space-x-2"
         >
-          Share
+          <FaExternalLinkAlt className="text-xs" />
+          <span>Share</span>
         </button>
       </div>
     </div>

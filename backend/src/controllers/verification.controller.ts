@@ -9,13 +9,156 @@ const blockchainService = new BlockchainService();
 const ipfsService = new IPFSService();
 
 /**
- * Verify a credential
+ * Validate credential parameters against verification requirements
+ */
+async function validateCredentialParameters(credential: any, verificationParams: any) {
+  try {
+    // Get decrypted credential data from IPFS
+    const ipfsData = await ipfsService.getData(credential.ipfsHash);
+    if (!ipfsData) {
+      return {
+        isValid: false,
+        reason: 'Could not retrieve credential data from IPFS'
+      };
+    }
+
+    const credentialData = ipfsData.credentialSubject || ipfsData;
+    const validationResults = [];
+
+    // Check GPA requirements
+    if (verificationParams.minGpa !== undefined) {
+      const studentGpa = parseFloat(credentialData.gpa);
+      const minGpa = parseFloat(verificationParams.minGpa);
+      
+      validationResults.push({
+        parameter: 'gpa',
+        required: `>= ${minGpa}`,
+        actual: studentGpa,
+        isValid: studentGpa >= minGpa,
+        message: studentGpa >= minGpa 
+          ? `GPA ${studentGpa} meets requirement (>= ${minGpa})`
+          : `GPA ${studentGpa} does not meet requirement (>= ${minGpa})`
+      });
+    }
+
+    // Check degree requirements
+    if (verificationParams.requiredDegree) {
+      const studentDegree = credentialData.degree;
+      const requiredDegree = verificationParams.requiredDegree;
+      
+      validationResults.push({
+        parameter: 'degree',
+        required: requiredDegree,
+        actual: studentDegree,
+        isValid: studentDegree === requiredDegree,
+        message: studentDegree === requiredDegree
+          ? `Degree ${studentDegree} matches requirement`
+          : `Degree ${studentDegree} does not match requirement (${requiredDegree})`
+      });
+    }
+
+    // Check major requirements
+    if (verificationParams.requiredMajor) {
+      const studentMajor = credentialData.major;
+      const requiredMajor = verificationParams.requiredMajor;
+      
+      validationResults.push({
+        parameter: 'major',
+        required: requiredMajor,
+        actual: studentMajor,
+        isValid: studentMajor === requiredMajor,
+        message: studentMajor === requiredMajor
+          ? `Major ${studentMajor} matches requirement`
+          : `Major ${studentMajor} does not match requirement (${requiredMajor})`
+      });
+    }
+
+    // Check graduation year requirements
+    if (verificationParams.minGraduationYear) {
+      const studentYear = parseInt(credentialData.graduationYear);
+      const minYear = parseInt(verificationParams.minGraduationYear);
+      
+      validationResults.push({
+        parameter: 'graduationYear',
+        required: `>= ${minYear}`,
+        actual: studentYear,
+        isValid: studentYear >= minYear,
+        message: studentYear >= minYear
+          ? `Graduation year ${studentYear} meets requirement (>= ${minYear})`
+          : `Graduation year ${studentYear} does not meet requirement (>= ${minYear})`
+      });
+    }
+
+    // Check experience requirements (for job credentials)
+    if (verificationParams.minExperience && credential.credentialType === 'JOB') {
+      const studentExperience = parseInt(credentialData.experienceMonths);
+      const minExperience = parseInt(verificationParams.minExperience);
+      
+      validationResults.push({
+        parameter: 'experience',
+        required: `>= ${minExperience} months`,
+        actual: `${studentExperience} months`,
+        isValid: studentExperience >= minExperience,
+        message: studentExperience >= minExperience
+          ? `Experience ${studentExperience} months meets requirement (>= ${minExperience})`
+          : `Experience ${studentExperience} months does not meet requirement (>= ${minExperience})`
+      });
+    }
+
+    // Check skills requirements
+    if (verificationParams.requiredSkills && Array.isArray(verificationParams.requiredSkills)) {
+      const studentSkills = credentialData.skills || [];
+      const requiredSkills = verificationParams.requiredSkills;
+      const hasAllSkills = requiredSkills.every((skill: string) => 
+        studentSkills.some((studentSkill: string) => 
+          studentSkill.toLowerCase().includes(skill.toLowerCase())
+        )
+      );
+      
+      validationResults.push({
+        parameter: 'skills',
+        required: requiredSkills,
+        actual: studentSkills,
+        isValid: hasAllSkills,
+        message: hasAllSkills
+          ? `All required skills are present`
+          : `Missing required skills: ${requiredSkills.filter((skill: string) => 
+              !studentSkills.some((studentSkill: string) => 
+                studentSkill.toLowerCase().includes(skill.toLowerCase())
+              )
+            ).join(', ')}`
+      });
+    }
+
+    // Overall validation result
+    const allValid = validationResults.every(result => result.isValid);
+
+    return {
+      isValid: allValid,
+      results: validationResults,
+      summary: allValid 
+        ? 'All verification parameters met'
+        : `${validationResults.filter(r => !r.isValid).length} parameter(s) not met`
+    };
+
+  } catch (error: any) {
+    logger.error('Error validating credential parameters:', error);
+    return {
+      isValid: false,
+      reason: 'Error validating parameters',
+      error: error.message
+    };
+  }
+}
+
+/**
+ * Verify a credential with optional parameters
  */
 export const verifyCredential = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { credentialHash } = req.body;
+    const { credentialHash, verificationParams } = req.body;
 
-    logger.info(`Verifying credential: ${credentialHash}`);
+    logger.info(`Verifying credential: ${credentialHash}`, { verificationParams });
 
     // Get credential from database
     const credential = await prisma.credential.findUnique({
@@ -56,13 +199,20 @@ export const verifyCredential = async (req: Request, res: Response, next: NextFu
 
     const isValid = isValidOnChain && !isRevokedOnChain;
 
+    // Check verification parameters if provided
+    let parameterValidation = null;
+    if (verificationParams && isValid) {
+      parameterValidation = await validateCredentialParameters(credential, verificationParams);
+    }
+
     // Log verification
     const verification = await prisma.verification.create({
       data: {
         credentialId: credential.id,
-        verifierId: (req as any).user.id,
+        verifierId: (req as any).user?.id || null,
         isValid,
         proofType: 'CREDENTIAL',
+        verificationParams: verificationParams ? JSON.stringify(verificationParams) : null,
       },
     });
 
@@ -70,6 +220,7 @@ export const verifyCredential = async (req: Request, res: Response, next: NextFu
       success: true,
       data: {
         isValid,
+        parameterValidation,
         credential: {
           type: credential.credentialType,
           issuer: credential.issuer.address,
@@ -82,6 +233,77 @@ export const verifyCredential = async (req: Request, res: Response, next: NextFu
     });
   } catch (error: any) {
     logger.error('Error verifying credential:', error);
+    next(error);
+  }
+};
+
+/**
+ * Public verification with parameters (no auth required)
+ */
+export const verifyCredentialWithParams = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { credentialHash, verificationParams } = req.body;
+
+    logger.info(`Public verify credential with params: ${credentialHash}`, { verificationParams });
+
+    // Get credential from database
+    const credential = await prisma.credential.findUnique({
+      where: { credentialHash },
+      include: {
+        issuer: true,
+        subject: true,
+      },
+    });
+
+    if (!credential) {
+      res.status(404).json({
+        success: false,
+        message: 'Credential not found',
+      });
+      return;
+    }
+
+    // Check if revoked in database
+    if (credential.isRevoked) {
+      res.json({
+        success: true,
+        data: {
+          isValid: false,
+          reason: 'Credential is revoked',
+          revokedAt: credential.revokedAt,
+          revocationReason: credential.revocationReason,
+        },
+      });
+      return;
+    }
+
+    // Verify on blockchain
+    const isValidOnChain = await blockchainService.verifyCredential(credentialHash);
+    const isRevokedOnChain = await blockchainService.isRevoked(credentialHash);
+    const isValid = isValidOnChain && !isRevokedOnChain;
+
+    // Check verification parameters
+    let parameterValidation = null;
+    if (verificationParams && isValid) {
+      parameterValidation = await validateCredentialParameters(credential, verificationParams);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        isValid,
+        parameterValidation,
+        credential: {
+          type: credential.credentialType,
+          issuer: credential.issuer.address,
+          subject: credential.subject.address,
+          issuedAt: credential.issuedAt,
+          expiresAt: credential.expiresAt,
+        },
+      },
+    });
+  } catch (error: any) {
+    logger.error('Error verifying credential with params:', error);
     next(error);
   }
 };

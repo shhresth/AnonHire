@@ -121,6 +121,13 @@ router.get('/:id/ipfs', authenticate, credentialController.getCredentialFromIPFS
  */
 router.get('/:id/decrypted', authenticate, credentialController.getDecryptedCredential);
 
+/**
+ * @route   GET /api/v1/credentials/revoked
+ * @desc    Get all revoked credentials
+ * @access  Private
+ */
+router.get('/revoked', authenticate, credentialController.getRevokedCredentials);
+
 export default router;
 
 
