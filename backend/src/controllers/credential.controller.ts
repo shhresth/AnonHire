@@ -576,7 +576,7 @@ export const getDecryptedCredential = async (
  * Get all revoked credentials
  */
 export const getRevokedCredentials = async (
-  req: Request,
+  _req: Request,
   res: Response,
   next: NextFunction
 ): Promise<void> => {

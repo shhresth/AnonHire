@@ -1,6 +1,14 @@
 import { Request, Response, NextFunction } from 'express';
 import { logRequest, logSecurity, logAudit } from '../utils/logger';
 
+// Type-safe global rate limit store
+const getRateLimitStore = (): Map<string, number[]> => {
+  if (!(globalThis as any).rateLimitStore) {
+    (globalThis as any).rateLimitStore = new Map<string, number[]>();
+  }
+  return (globalThis as any).rateLimitStore as Map<string, number[]>;
+};
+
 /**
  * Request logging middleware
  * Logs all HTTP requests with performance metrics
@@ -76,15 +84,13 @@ export const securityLogger = (req: Request, res: Response, next: NextFunction):
   const key = `rate_limit_${ip}`;
   
   // This is a basic implementation - in production, use Redis or similar
-  if (!global.rateLimitStore) {
-    global.rateLimitStore = new Map();
-  }
+  const rateLimitStore = getRateLimitStore();
   
   const now = Date.now();
   const windowMs = 15 * 60 * 1000; // 15 minutes
   const maxRequests = 100; // Max requests per window
   
-  const requests = global.rateLimitStore.get(key) || [];
+  const requests = rateLimitStore.get(key) || [];
   const validRequests = requests.filter((time: number) => now - time < windowMs);
   
   if (validRequests.length >= maxRequests) {
@@ -103,12 +109,8 @@ export const securityLogger = (req: Request, res: Response, next: NextFunction):
   }
   
   validRequests.push(now);
-  global.rateLimitStore.set(key, validRequests);
+  rateLimitStore.set(key, validRequests);
   
   next();
 };
 
-// Extend global type for rate limiting
-declare global {
-  var rateLimitStore: Map<string, number[]>;
-}

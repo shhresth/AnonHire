@@ -14,7 +14,7 @@ const ipfsService = new IPFSService();
 async function validateCredentialParameters(credential: any, verificationParams: any) {
   try {
     // Get decrypted credential data from IPFS
-    const ipfsData = await ipfsService.getData(credential.ipfsHash);
+    const ipfsData = await ipfsService.getJSON(credential.ipfsHash);
     if (!ipfsData) {
       return {
         isValid: false,
@@ -212,7 +212,7 @@ export const verifyCredential = async (req: Request, res: Response, next: NextFu
         verifierId: (req as any).user?.id || null,
         isValid,
         proofType: 'CREDENTIAL',
-        verificationParams: verificationParams ? JSON.stringify(verificationParams) : null,
+        proofData: verificationParams ? JSON.stringify(verificationParams) : null,
       },
     });
 
