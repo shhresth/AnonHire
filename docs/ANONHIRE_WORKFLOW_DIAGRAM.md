@@ -401,4 +401,337 @@ mindmap
         Immutable History
 ```
 
+### 5. DID Creation & Registration Flow
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant W as Wallet Frontend
+    participant B as Backend API
+    participant MM as MetaMask
+    participant BC as Blockchain
+    participant DID as DID Registry Contract
+    
+    U->>W: Request to create DID
+    W->>MM: Request wallet connection
+    MM-->>W: Return wallet address
+    W->>B: POST /api/v1/did/create
+    Note over B: Generate DID from wallet address
+    B->>B: Create DID: did:ethr:{address}
+    B->>BC: Register DID on blockchain
+    BC->>DID: registerDID(address, did)
+    DID-->>BC: Transaction receipt
+    BC-->>B: DID registered successfully
+    B->>B: Store DID mapping in database
+    B-->>W: Return DID details
+    W-->>U: Display DID creation success
+```
+
+### 6. Credential Revocation Flow
+
+```mermaid
+sequenceDiagram
+    participant I as Issuer
+    participant IF as Issuer Frontend
+    participant B as Backend API
+    participant DB as PostgreSQL
+    participant BC as Blockchain
+    participant RR as Revocation Registry
+    participant IPFS as IPFS
+    
+    I->>IF: Select credential to revoke
+    IF->>B: POST /api/v1/credentials/revoke
+    B->>DB: Check credential exists
+    DB-->>B: Return credential data
+    B->>BC: Revoke credential on blockchain
+    BC->>RR: revokeCredential(credentialId, reason)
+    RR-->>BC: Transaction receipt
+    BC-->>B: Revocation confirmed
+    B->>DB: Update credential status to revoked
+    B->>IPFS: Update credential metadata
+    IPFS-->>B: Updated IPFS hash
+    B->>DB: Store revocation details
+    B-->>IF: Return revocation confirmation
+    IF-->>I: Show revocation success
+```
+
+## Algorithm & Decision Flowcharts
+
+### 1. ZKP Proof Verification Algorithm
+
+```mermaid
+flowchart TD
+    Start([Start ZKP Verification]) --> Input[Receive Proof Data]
+    Input --> CheckFormat{Proof Format<br/>Valid?}
+    CheckFormat -->|No| Error1[Return Invalid Format Error]
+    CheckFormat -->|Yes| CheckType{Proof Type?}
+    
+    CheckType -->|GPA Proof| ValidateGPA[Validate GPA Proof]
+    CheckType -->|Experience Proof| ValidateExp[Validate Experience Proof]
+    CheckType -->|Mock Proof| ValidateMock[Validate Mock Proof]
+    
+    ValidateGPA --> CheckCircuit{Circuit Compiled<br/>& Available?}
+    CheckCircuit -->|No| FallbackMock[Use Mock ZKP]
+    CheckCircuit -->|Yes| LoadGPA[Load GPA Circuit]
+    LoadGPA --> VerifyGPA[Verify Proof with SnarkJS]
+    
+    ValidateExp --> CheckCircuitExp{Experience Circuit<br/>Available?}
+    CheckCircuitExp -->|No| FallbackMock
+    CheckCircuitExp -->|Yes| LoadExp[Load Experience Circuit]
+    LoadExp --> VerifyExp[Verify Proof with SnarkJS]
+    
+    ValidateMock --> VerifyMock[Verify Mock Proof Signature]
+    FallbackMock --> VerifyMock
+    
+    VerifyGPA --> CheckResult{Verification<br/>Successful?}
+    VerifyExp --> CheckResult
+    VerifyMock --> CheckResult
+    
+    CheckResult -->|Yes| Success[Return Verified Status]
+    CheckResult -->|No| Error2[Return Verification Failed]
+    
+    Success --> LogSuccess[Log Verification Success]
+    Error1 --> LogError[Log Error]
+    Error2 --> LogError
+    LogSuccess --> End([End])
+    LogError --> End
+```
+
+### 2. Credential Verification Decision Flow
+
+```mermaid
+flowchart TD
+    Start([Start Verification]) --> Receive[Receive Credential Request]
+    Receive --> ValidateInput{Input Data<br/>Valid?}
+    ValidateInput -->|No| Error1[Return Validation Error]
+    ValidateInput -->|Yes| CheckIPFS{Credential in<br/>IPFS?}
+    
+    CheckIPFS -->|No| Error2[Return Credential Not Found]
+    CheckIPFS -->|Yes| FetchIPFS[Fetch Credential from IPFS]
+    FetchIPFS --> Parse[Parse Credential Data]
+    Parse --> CheckRevoked{Is Credential<br/>Revoked?}
+    
+    CheckRevoked -->|Yes| Error3[Return Revoked Status]
+    CheckRevoked -->|No| CheckBlockchain{Check Blockchain<br/>Registration}
+    
+    CheckBlockchain --> VerifyHash{Credential Hash<br/>Matches?}
+    VerifyHash -->|No| Error4[Return Hash Mismatch]
+    VerifyHash -->|Yes| CheckIssuer{Issuer DID<br/>Valid?}
+    
+    CheckIssuer -->|No| Error5[Return Invalid Issuer]
+    CheckIssuer -->|Yes| CheckZKP{ZKP Proof<br/>Provided?}
+    
+    CheckZKP -->|Yes| VerifyZKP[Verify ZKP Proof]
+    VerifyZKP --> ZKPResult{ZKP Verification<br/>Successful?}
+    ZKPResult -->|No| Error6[Return ZKP Verification Failed]
+    ZKPResult -->|Yes| Success[Return Verified Status]
+    
+    CheckZKP -->|No| Success
+    
+    Success --> LogVerify[Log Verification Success]
+    Error1 --> LogError[Log Error]
+    Error2 --> LogError
+    Error3 --> LogError
+    Error4 --> LogError
+    Error5 --> LogError
+    Error6 --> LogError
+    
+    LogVerify --> End([End])
+    LogError --> End
+```
+
+### 3. Credential Lifecycle Flowchart
+
+```mermaid
+flowchart LR
+    Start([Credential Lifecycle]) --> Create[📝 Create Credential]
+    Create --> Issue[✅ Issue Credential]
+    Issue --> StoreIPFS[🌐 Store on IPFS]
+    StoreIPFS --> RegisterBC[⛓️ Register on Blockchain]
+    RegisterBC --> Active[(🟢 Active Status)]
+    
+    Active --> View[👀 View Credential]
+    Active --> GenerateZKP[🧮 Generate ZKP]
+    Active --> Share[📤 Share Credential]
+    Active --> Verify[🔍 Verify Credential]
+    Active --> Revoke{Revoke?}
+    
+    Revoke -->|No| Active
+    Revoke -->|Yes| RevokeBC[🚫 Revoke on Blockchain]
+    RevokeBC --> Revoked[(🔴 Revoked Status)]
+    
+    Revoked --> Check[❌ Verification Fails]
+    View --> Active
+    GenerateZKP --> Active
+    Share --> Active
+    Verify --> Valid{Valid?}
+    Valid -->|Yes| Verified[(✅ Verified)]
+    Valid -->|No| Invalid[(❌ Invalid)]
+    
+    Verified --> End([End])
+    Invalid --> End
+    Check --> End
+```
+
+### 4. Authentication & Authorization Flow
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant F as Frontend
+    participant B as Backend API
+    participant MM as MetaMask
+    participant DB as Database
+    participant JWT as JWT Service
+    
+    U->>F: Access Protected Resource
+    F->>B: API Request
+    B->>B: Extract Auth Token
+    
+    alt Token Present
+        B->>JWT: Verify JWT Token
+        JWT-->>B: Token Valid/Invalid
+        alt Token Valid
+            B->>DB: Get User from Token
+            DB-->>B: User Data
+            B->>B: Check Permissions
+            alt Authorized
+                B-->>F: Return Requested Data
+                F-->>U: Display Content
+            else Unauthorized
+                B-->>F: 403 Forbidden
+                F-->>U: Show Access Denied
+            end
+        else Token Invalid/Expired
+            B-->>F: 401 Unauthorized
+            F->>MM: Request Wallet Connection
+            MM-->>F: Wallet Signature
+            F->>B: POST /api/v1/auth/login
+            B->>DB: Verify Wallet Address
+            DB-->>B: User Found/Create
+            B->>JWT: Generate JWT Token
+            JWT-->>B: Token
+            B-->>F: Return Token & User Data
+            F->>F: Store Token
+            F->>B: Retry Original Request
+        end
+    else No Token
+        B-->>F: 401 Unauthorized
+        F->>MM: Request Wallet Connection
+        MM-->>F: Wallet Signature
+        F->>B: POST /api/v1/auth/login
+        B->>DB: Verify/Create User
+        DB-->>B: User Data
+        B->>JWT: Generate JWT Token
+        JWT-->>B: Token
+        B-->>F: Return Token & User Data
+        F->>F: Store Token
+        F->>B: Retry Original Request
+    end
+```
+
+### 5. Smart Contract Interaction Flow
+
+```mermaid
+flowchart TD
+    Start([Contract Operation Request]) --> SelectOp{Operation Type?}
+    
+    SelectOp -->|Create DID| DIDFlow[Create DID Flow]
+    SelectOp -->|Issue Credential| CredFlow[Issue Credential Flow]
+    SelectOp -->|Revoke Credential| RevFlow[Revoke Credential Flow]
+    SelectOp -->|Verify Credential| VerifyFlow[Verify Credential Flow]
+    
+    DIDFlow --> CheckWallet{Wallet<br/>Connected?}
+    CheckWallet -->|No| ConnectWallet[Connect MetaMask Wallet]
+    CheckWallet -->|Yes| PrepDIDTx[Prepare DID Registration Transaction]
+    ConnectWallet --> PrepDIDTx
+    PrepDIDTx --> SendDIDTx[Send Transaction to DID Registry]
+    
+    CredFlow --> ValidateCred{Validate<br/>Credential Data}
+    ValidateCred -->|Invalid| Error1[Return Validation Error]
+    ValidateCred -->|Valid| PrepCredTx[Prepare Credential Transaction]
+    PrepCredTx --> SendCredTx[Send Transaction to VC Contract]
+    
+    RevFlow --> CheckAuth{Is Authorized<br/>to Revoke?}
+    CheckAuth -->|No| Error2[Return Authorization Error]
+    CheckAuth -->|Yes| PrepRevTx[Prepare Revocation Transaction]
+    PrepRevTx --> SendRevTx[Send Transaction to Revocation Registry]
+    
+    VerifyFlow --> FetchCred[Fetch Credential from Contract]
+    FetchCred --> CheckStatus{Credential<br/>Status?}
+    CheckStatus -->|Revoked| Error3[Return Revoked Status]
+    CheckStatus -->|Active| ValidateHash{Validate<br/>Credential Hash}
+    ValidateHash -->|Invalid| Error4[Return Invalid Hash]
+    ValidateHash -->|Valid| ReturnValid[Return Valid Status]
+    
+    SendDIDTx --> WaitConfirm[Wait for Transaction Confirmation]
+    SendCredTx --> WaitConfirm
+    SendRevTx --> WaitConfirm
+    
+    WaitConfirm --> CheckConfirm{Transaction<br/>Confirmed?}
+    CheckConfirm -->|No| TimeoutError[Handle Timeout]
+    CheckConfirm -->|Yes| ParseResult[Parse Transaction Receipt]
+    ParseResult --> UpdateDB[Update Database with Result]
+    UpdateDB --> ReturnSuccess[Return Success Response]
+    
+    ReturnSuccess --> End([End])
+    ReturnValid --> End
+    Error1 --> End
+    Error2 --> End
+    Error3 --> End
+    Error4 --> End
+    TimeoutError --> End
+```
+
+### 6. IPFS Upload & Retrieval Algorithm
+
+```mermaid
+flowchart TD
+    Start([IPFS Operation]) --> OpType{Operation<br/>Type?}
+    
+    OpType -->|Upload| UploadFlow[Upload Flow]
+    OpType -->|Retrieve| RetrieveFlow[Retrieve Flow]
+    
+    UploadFlow --> Prepare[Prepare Credential Data]
+    Prepare --> Encrypt{Need<br/>Encryption?}
+    Encrypt -->|Yes| EncryptData[Encrypt Data with AES-256]
+    Encrypt -->|No| ValidateData[Validate Data Structure]
+    EncryptData --> ValidateData
+    
+    ValidateData -->|Invalid| Error1[Return Validation Error]
+    ValidateData -->|Valid| ConvertJSON[Convert to JSON]
+    ConvertJSON --> UploadIPFS[Upload to Pinata IPFS]
+    
+    UploadIPFS --> CheckUpload{Upload<br/>Successful?}
+    CheckUpload -->|No| Error2[Return Upload Error]
+    CheckUpload -->|Yes| GetHash[Retrieve IPFS Hash CID]
+    GetHash --> StoreHash[Store Hash in Database]
+    StoreHash --> ReturnCID[Return IPFS Hash]
+    
+    RetrieveFlow --> GetCID[Get IPFS Hash CID]
+    GetCID --> CheckCID{CID<br/>Valid?}
+    CheckCID -->|No| Error3[Return Invalid CID]
+    CheckCID -->|Yes| FetchIPFS[Fetch from Pinata IPFS]
+    
+    FetchIPFS --> CheckFetch{Fetch<br/>Successful?}
+    CheckFetch -->|No| Error4[Return Fetch Error]
+    CheckFetch -->|Yes| ParseData[Parse Retrieved Data]
+    ParseData --> Decrypt{Data<br/>Encrypted?}
+    
+    Decrypt -->|Yes| DecryptData[Decrypt Data]
+    Decrypt -->|No| ValidateRetrieved[Validate Retrieved Data]
+    DecryptData --> ValidateRetrieved
+    
+    ValidateRetrieved -->|Invalid| Error5[Return Invalid Data Error]
+    ValidateRetrieved -->|Valid| ReturnData[Return Credential Data]
+    
+    ReturnCID --> End([End])
+    ReturnData --> End
+    Error1 --> End
+    Error2 --> End
+    Error3 --> End
+    Error4 --> End
+    Error5 --> End
+```
+
 This comprehensive workflow diagram shows the complete AnonHire system architecture, user flows, and technology stack. The system provides a full-featured credential verification platform with blockchain integration, IPFS storage, and zero-knowledge proof capabilities.
