@@ -72,14 +72,18 @@ export const issueAcademicCredential = async (
 
     logger.info(`Credential uploaded to IPFS: ${ipfsHash}`);
 
-    // Issue credential on blockchain
-    const txHash = await blockchainService.issueAcademicVC(
-      subjectAddress,
-      ipfsHash,
-      expiresAt ? Math.floor(new Date(expiresAt).getTime() / 1000) : 0
-    );
-
-    logger.info(`Credential issued on blockchain: ${txHash}`);
+    // Issue credential on blockchain (optional — continues if blockchain unavailable)
+    let txHash: string | null = null;
+    try {
+      txHash = await blockchainService.issueAcademicVC(
+        subjectAddress,
+        ipfsHash,
+        expiresAt ? Math.floor(new Date(expiresAt).getTime() / 1000) : 0
+      );
+      logger.info(`Credential issued on blockchain: ${txHash}`);
+    } catch (blockchainError: any) {
+      logger.warn(`Blockchain anchoring skipped: ${blockchainError.message}`);
+    }
 
     // Generate credential hash
     const credentialHash = ethers.keccak256(
@@ -180,7 +184,13 @@ export const issueJobCredential = async (
       }
     });
 
-    const txHash = await blockchainService.issueJobVC(subjectAddress, ipfsHash, 0);
+    let txHash: string | null = null;
+    try {
+      txHash = await blockchainService.issueJobVC(subjectAddress, ipfsHash, 0);
+      logger.info(`Credential issued on blockchain: ${txHash}`);
+    } catch (blockchainError: any) {
+      logger.warn(`Blockchain anchoring skipped: ${blockchainError.message}`);
+    }
 
     const credentialHash = ethers.keccak256(
       ethers.toUtf8Bytes(`${issuerAddress}${subjectAddress}${ipfsHash}${Date.now()}`)
@@ -275,7 +285,13 @@ export const issueInternshipCredential = async (
       }
     });
 
-    const txHash = await blockchainService.issueInternshipVC(subjectAddress, ipfsHash, 0);
+    let txHash: string | null = null;
+    try {
+      txHash = await blockchainService.issueInternshipVC(subjectAddress, ipfsHash, 0);
+      logger.info(`Credential issued on blockchain: ${txHash}`);
+    } catch (blockchainError: any) {
+      logger.warn(`Blockchain anchoring skipped: ${blockchainError.message}`);
+    }
 
     const credentialHash = ethers.keccak256(
       ethers.toUtf8Bytes(`${issuerAddress}${subjectAddress}${ipfsHash}${Date.now()}`)
@@ -530,6 +546,7 @@ export const getDecryptedCredential = async (
         expiresAt: true,
         issuer: { select: { address: true, did: true } },
         subjectId: true,
+        subject: { select: { address: true } },
       },
     });
 
@@ -538,9 +555,13 @@ export const getDecryptedCredential = async (
       return;
     }
 
-    // Allow only the subject (owner) to read decrypted content
-    const requesterId = (req as any).user.id;
-    if (credential.subjectId !== requesterId) {
+    // Allow only the subject (owner) to read decrypted content.
+    // Compare both by ID and by address (case-insensitive) to handle legacy
+    // records where the subject user was created with a different address casing.
+    const requester = (req as any).user;
+    const idMatch = credential.subjectId === requester.id;
+    const addressMatch = credential.subject?.address?.toLowerCase() === requester.address?.toLowerCase();
+    if (!idMatch && !addressMatch) {
       res.status(403).json({ success: false, message: 'Not authorized to view this credential' });
       return;
     }
@@ -623,12 +644,13 @@ export const getRevokedCredentials = async (
  * Helper function to get user ID by address
  */
 async function getUserIdByAddress(address: string): Promise<string> {
-  let user = await prisma.user.findUnique({ where: { address } });
+  const normalizedAddress = address.toLowerCase();
+  let user = await prisma.user.findUnique({ where: { address: normalizedAddress } });
   
   if (!user) {
     user = await prisma.user.create({
       data: {
-        address,
+        address: normalizedAddress,
         role: 'CANDIDATE'
       }
     });

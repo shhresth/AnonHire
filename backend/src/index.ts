@@ -1,15 +1,14 @@
+// Load environment variables FIRST, before any other imports read process.env
+import './config/env';
+
 import express, { Application } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
-import dotenv from 'dotenv';
 import { errorHandler } from './middleware/errorHandler';
 import { requestLogger, securityLogger } from './middleware/requestLogger';
 import { logger, logAudit } from './utils/logger';
 import routes from './routes';
-
-// Load environment variables
-dotenv.config({ path: '../.env' });
 
 const app: Application = express();
 const PORT = process.env.PORT || 3001;
