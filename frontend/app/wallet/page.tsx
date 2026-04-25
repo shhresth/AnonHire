@@ -4,9 +4,11 @@ import { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount } from 'wagmi';
-import { FaArrowLeft, FaPlus, FaShieldAlt, FaGraduationCap, FaBriefcase, FaUserTie, FaCopy, FaExternalLinkAlt, FaCheckCircle, FaExclamationTriangle, FaClock } from 'react-icons/fa';
+import { FaArrowLeft, FaPlus, FaShieldAlt, FaGraduationCap, FaBriefcase, FaUserTie, FaCopy, FaExternalLinkAlt, FaCheckCircle, FaExclamationTriangle, FaClock, FaQrcode, FaDownload } from 'react-icons/fa';
+import { QRCodeSVG } from 'qrcode.react';
 import Link from 'next/link';
 import TopNav from '@/components/TopNav';
+import { decryptCredentialData, generateClientProofPackage } from '@/lib/client-zkp';
 
 export default function WalletPage() {
   const { address, isConnected } = useAccount();
@@ -108,6 +110,7 @@ export default function WalletPage() {
         status: c.isRevoked ? 'revoked' : 'active',
         details: {},
         credentialHash: c.credentialHash,
+        encryptedData: c.encryptedData,
         ipfsHash: c.ipfsHash,
         txHash: c.txHash,
       }));
@@ -305,8 +308,12 @@ export default function WalletPage() {
 
       {showShareModal && (
         <ShareModal 
-          onClose={() => setShowShareModal(false)}
+          onClose={() => {
+            setShowShareModal(false);
+            setSelectedCredential(null);
+          }}
           credentials={credentials}
+          preSelectedCredential={selectedCredential}
         />
       )}
 
@@ -319,8 +326,6 @@ export default function WalletPage() {
       {showViewModal && selectedCredential && (
         <ViewCredentialModal 
           credential={selectedCredential}
-          getToken={ensureBackendAuth}
-          expectedAddress={address}
           onClose={() => {
             setShowViewModal(false);
             setSelectedCredential(null);
@@ -339,11 +344,73 @@ type UICredential = {
   status: string;
   details?: any;
   credentialHash?: string;
+  encryptedData?: string;
   ipfsHash?: string;
   txHash?: string;
 };
 
 function CredentialCard({ credential, onView, onShare }: { credential: UICredential; onView: (c: UICredential)=>void; onShare: (c: UICredential)=>void; }) {
+  const [cardTitle, setCardTitle] = useState<string>(credential.type);
+
+  const toTitleCase = (value: string) =>
+    value
+      .replace(/[_-]+/g, ' ')
+      .split(' ')
+      .map((w) => (w ? w.charAt(0).toUpperCase() + w.slice(1) : w))
+      .join(' ')
+      .trim();
+
+  const buildCardTitle = (type: string, details: any) => {
+    if (type === 'JOB') {
+      const role = details?.position || details?.role || details?.title || 'Work';
+      const org = details?.company || details?.organization || details?.employer || 'Unknown organization';
+      return `${role} experience at ${org}`;
+    }
+
+    if (type === 'ACADEMIC') {
+      const degree = details?.degree || details?.program || details?.major || 'Academic credential';
+      const institution =
+        details?.institution ||
+        details?.university ||
+        details?.college ||
+        details?.school ||
+        'Unknown institution';
+      return `${degree} at ${institution}`;
+    }
+
+    if (type === 'INTERNSHIP') {
+      const role = details?.position || details?.role || 'Internship';
+      const org = details?.company || details?.organization || details?.employer || 'Unknown organization';
+      return `${role} internship at ${org}`;
+    }
+
+    return toTitleCase(type || 'Credential');
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadTitle = async () => {
+      try {
+        let details = credential.details;
+        if ((!details || Object.keys(details).length === 0) && credential.encryptedData) {
+          const decrypted = await decryptCredentialData(credential.encryptedData);
+          details = decrypted?.credentialSubject || decrypted || {};
+        }
+
+        const computed = buildCardTitle(credential.type, details || {});
+        if (!cancelled) setCardTitle(computed);
+      } catch {
+        if (!cancelled) setCardTitle(toTitleCase(credential.type || 'Credential'));
+      }
+    };
+
+    loadTitle();
+    return () => {
+      cancelled = true;
+    };
+  }, [credential.type, credential.encryptedData, credential.details]);
+
   const getCredentialIcon = (type: string) => {
     switch (type) {
       case 'ACADEMIC':
@@ -416,7 +483,8 @@ function CredentialCard({ credential, onView, onShare }: { credential: UICredent
 
       {/* Content */}
       <div className="mb-4">
-        <h4 className="text-lg font-bold mb-1 truncate">{credential.issuer}</h4>
+        <h4 className="text-lg font-bold mb-1 truncate">{cardTitle}</h4>
+        <p className="text-xs text-white/75 truncate">Issued by {credential.issuer}</p>
         <p className="text-sm text-white/80">Issued: {formatDate(credential.issuedAt)}</p>
         
         {/* Credential Hash */}
@@ -425,7 +493,7 @@ function CredentialCard({ credential, onView, onShare }: { credential: UICredent
             <div className="flex items-center justify-between">
               <span className="text-xs text-white/70">Credential Hash:</span>
               <button
-                onClick={() => copyToClipboard(credential.credentialHash, 'Credential Hash')}
+                onClick={() => copyToClipboard(credential.credentialHash ?? '', 'Credential Hash')}
                 className="text-white/70 hover:text-white transition-colors"
               >
                 <FaCopy className="text-xs" />
@@ -443,7 +511,7 @@ function CredentialCard({ credential, onView, onShare }: { credential: UICredent
             <div className="flex items-center justify-between">
               <span className="text-xs text-white/70">Transaction:</span>
               <button
-                onClick={() => copyToClipboard(credential.txHash, 'Transaction Hash')}
+                onClick={() => copyToClipboard(credential.txHash ?? '', 'Transaction Hash')}
                 className="text-white/70 hover:text-white transition-colors"
               >
                 <FaCopy className="text-xs" />
@@ -461,7 +529,7 @@ function CredentialCard({ credential, onView, onShare }: { credential: UICredent
             <div className="flex items-center justify-between">
               <span className="text-xs text-white/70">IPFS CID:</span>
               <button
-                onClick={() => copyToClipboard(credential.ipfsHash, 'IPFS CID')}
+                onClick={() => copyToClipboard(credential.ipfsHash ?? '', 'IPFS CID')}
                 className="text-white/70 hover:text-white transition-colors"
               >
                 <FaCopy className="text-xs" />
@@ -584,128 +652,292 @@ function AddCredentialModal({ onClose, onAdd }: any) {
 
 // ZKP Modal
 function ZKPModal({ onClose, credentials }: any) {
-  const [selectedCredential, setSelectedCredential] = useState('');
-  const [zkpResult, setZkpResult] = useState('');
+  const [selectedCredentialId, setSelectedCredentialId] = useState('');
   const [proofType, setProofType] = useState('gpa_proof');
-  const [threshold, setThreshold] = useState('300'); // 3.0 GPA threshold
+  const [threshold, setThreshold] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [generatedProof, setGeneratedProof] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+
+  const isGPA = proofType === 'gpa_proof';
+
+  // Filter credentials by compatible type
+  const eligibleCredentials = credentials.filter((c: any) =>
+    isGPA ? c.type === 'ACADEMIC' : (c.type === 'JOB' || c.type === 'INTERNSHIP')
+  );
 
   const generateZKP = async () => {
-    if (!selectedCredential) return;
-    
+    if (!selectedCredentialId || !threshold) return;
     setIsGenerating(true);
-    
+    setError(null);
+    setGeneratedProof(null);
+
     try {
-      // Call the mock ZKP system
-      const response = await fetch('http://localhost:3001/api/v1/zkp/generate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          credentialId: selectedCredential,
-          proofType: proofType,
-          threshold: parseInt(threshold),
-          salt: Math.random().toString(36).substring(7)
-        })
-      });
-      
-      if (response.ok) {
-        const result = await response.json();
-        setZkpResult(`✅ ${result.type} proof generated successfully!\n\nProof: ${result.proof}\nValid: ${result.valid ? 'YES' : 'NO'}\nCommitment: ${result.publicInputs.commitment}`);
-      } else {
-        // Fallback to mock generation
-        const mockProof = {
-          type: proofType,
-          proof: '0x' + Math.random().toString(16).substr(2, 64),
-          valid: true,
-          publicInputs: {
-            commitment: '0x' + Math.random().toString(16).substr(2, 64)
-          }
-        };
-        setZkpResult(`✅ ${mockProof.type} proof generated successfully!\n\nProof: ${mockProof.proof}\nValid: ${mockProof.valid ? 'YES' : 'NO'}\nCommitment: ${mockProof.publicInputs.commitment}`);
+      const api = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001').replace(/\/$/, '');
+      const selected = eligibleCredentials.find((c: any) => String(c.dbId || c.id) === String(selectedCredentialId));
+      if (!selected?.encryptedData) {
+        throw new Error('Credential encryption payload not available in wallet');
       }
-    } catch (error) {
-      // Fallback to mock generation
-      const mockProof = {
-        type: proofType,
-        proof: '0x' + Math.random().toString(16).substr(2, 64),
-        valid: true,
-        publicInputs: {
-          commitment: '0x' + Math.random().toString(16).substr(2, 64)
-        }
-      };
-      setZkpResult(`✅ ${mockProof.type} proof generated successfully!\n\nProof: ${mockProof.proof}\nValid: ${mockProof.valid ? 'YES' : 'NO'}\nCommitment: ${mockProof.publicInputs.commitment}`);
+      if (!selected?.credentialHash) {
+        throw new Error('Credential hash is missing');
+      }
+
+      const proofPackage = await generateClientProofPackage({
+        proofType: isGPA ? 'gpa' : 'experience',
+        threshold: Number(threshold),
+        credentialHash: selected.credentialHash,
+        encryptedData: selected.encryptedData,
+        apiBaseUrl: api,
+      });
+
+      setGeneratedProof(proofPackage);
+    } catch (e: any) {
+      setError(e.message || 'Failed to generate proof');
     } finally {
       setIsGenerating(false);
     }
   };
 
+  const proofPackage = generatedProof
+    ? JSON.stringify(generatedProof, null, 2)
+    : '';
+
+  const copyProof = () => {
+    navigator.clipboard.writeText(proofPackage);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const encodeProofForUrl = (payload: any) => {
+    const json = JSON.stringify(payload);
+    return btoa(unescape(encodeURIComponent(json)))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/g, '');
+  };
+
+  const zkpShareUrl = generatedProof && typeof window !== 'undefined'
+    ? `${window.location.origin}/verifier?zkp=${encodeURIComponent(encodeProofForUrl(generatedProof))}`
+    : '';
+
+  const copyShareLink = () => {
+    if (!zkpShareUrl) return;
+    navigator.clipboard.writeText(zkpShareUrl);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2000);
+  };
+
+  const downloadZkpQR = () => {
+    const svg = document.getElementById('zkp-share-qr-svg');
+    if (!svg) return;
+    const svgData = new XMLSerializer().serializeToString(svg);
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d')!;
+    const img = new Image();
+    img.onload = () => {
+      ctx.drawImage(img, 0, 0);
+      const link = document.createElement('a');
+      link.download = `zkp-proof-qr-${Date.now()}.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    };
+    img.src = `data:image/svg+xml;base64,${btoa(svgData)}`;
+  };
+
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 w-full max-w-md">
-        <h3 className="text-xl font-bold mb-4">Generate Zero-Knowledge Proof</h3>
-        
-        <div className="mb-4">
-          <label className="block text-sm font-medium mb-2">Select Credential</label>
-          <select
-            value={selectedCredential}
-            onChange={(e) => setSelectedCredential(e.target.value)}
-            className="w-full p-2 border rounded-lg"
-          >
-            <option value="">Choose a credential...</option>
-            {credentials.map((cred: any) => (
-              <option key={cred.id} value={cred.id}>
-                {cred.type} - {cred.issuer}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="mb-4">
-          <label className="block text-sm font-medium mb-2">Proof Type</label>
-          <select
-            value={proofType}
-            onChange={(e) => setProofType(e.target.value)}
-            className="w-full p-2 border rounded-lg"
-          >
-            <option value="gpa_proof">GPA Proof (Academic)</option>
-            <option value="experience_proof">Experience Proof (Job)</option>
-          </select>
-        </div>
-
-        <div className="mb-4">
-          <label className="block text-sm font-medium mb-2">
-            {proofType === 'gpa_proof' ? 'GPA Threshold (scaled by 100)' : 'Required Experience (months)'}
-          </label>
-          <input
-            type="number"
-            value={threshold}
-            onChange={(e) => setThreshold(e.target.value)}
-            className="w-full p-2 border rounded-lg"
-            placeholder={proofType === 'gpa_proof' ? '300 (3.0 GPA)' : '12 (12 months)'}
-          />
-        </div>
-
-        {zkpResult && (
-          <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
-            <pre className="text-sm text-green-800 whitespace-pre-wrap">{zkpResult}</pre>
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        {/* Header */}
+        <div className="flex justify-between items-center p-6 border-b">
+          <div>
+            <h3 className="text-xl font-bold text-gray-900">Generate Zero-Knowledge Proof</h3>
+            <p className="text-sm text-gray-500 mt-1">Your actual credential data is never disclosed</p>
           </div>
-        )}
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+        </div>
 
-        <div className="flex space-x-3">
+        <div className="p-6 space-y-5">
+          {/* Proof Type */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Proof Type</label>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { value: 'gpa_proof', label: '🎓 GPA Proof', sub: 'Academic credential' },
+                { value: 'experience_proof', label: '💼 Experience Proof', sub: 'Job / Internship' },
+              ].map(({ value, label, sub }) => (
+                <button
+                  key={value}
+                  onClick={() => { setProofType(value); setSelectedCredentialId(''); setThreshold(''); setGeneratedProof(null); setError(null); }}
+                  className={`p-3 rounded-lg border-2 text-left transition-colors ${
+                    proofType === value ? 'border-green-500 bg-green-50' : 'border-gray-200 hover:border-gray-300'
+                  }`}
+                >
+                  <div className="font-medium text-gray-900">{label}</div>
+                  <div className="text-xs text-gray-500">{sub}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Credential selector */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Select Credential</label>
+            {eligibleCredentials.length === 0 ? (
+              <p className="text-sm text-amber-600 bg-amber-50 p-3 rounded-lg">
+                No {isGPA ? 'academic' : 'job/internship'} credentials found in your wallet.
+              </p>
+            ) : (
+              <select
+                value={selectedCredentialId}
+                onChange={(e) => setSelectedCredentialId(e.target.value)}
+                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
+              >
+                <option value="">Choose a credential…</option>
+                {eligibleCredentials.map((cred: any) => (
+                  <option key={cred.dbId || cred.id} value={cred.dbId || cred.id}>
+                    {cred.type} — {cred.issuer} ({cred.issuedAt})
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
+          {/* Threshold input */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              {isGPA ? 'Minimum GPA Threshold (0–10)' : 'Required Experience (months)'}
+            </label>
+            <input
+              type="number"
+              value={threshold}
+              onChange={(e) => setThreshold(e.target.value)}
+              min={0}
+              max={isGPA ? 10 : undefined}
+              step={isGPA ? 0.1 : 1}
+              placeholder={isGPA ? 'e.g. 7.0' : 'e.g. 12'}
+              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              {isGPA
+                ? 'The proof will confirm your GPA meets this threshold — the actual value stays hidden.'
+                : 'The proof will confirm your experience meets this requirement — the actual months stay hidden.'}
+            </p>
+          </div>
+
+          {/* Error */}
+          {error && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>
+          )}
+
+          {/* Generated proof output */}
+          {generatedProof && (
+            <div className="space-y-3">
+              <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+                <div className="flex items-center space-x-2 mb-1">
+                  <span className="text-green-600 font-semibold">✅ Proof generated successfully!</span>
+                </div>
+                <p className="text-xs text-green-700">
+                  {isGPA
+                    ? `This proof cryptographically confirms GPA ≥ ${threshold} without revealing your actual GPA.`
+                    : `This proof cryptographically confirms experience ≥ ${threshold} months without revealing the actual value.`
+                  }
+                </p>
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="text-sm font-medium text-gray-700">Proof Package (share with verifier)</label>
+                  <button
+                    onClick={copyProof}
+                    className={`text-xs px-3 py-1 rounded-full transition-colors ${
+                      copied ? 'bg-green-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                    }`}
+                  >
+                    {copied ? '✓ Copied' : 'Copy JSON'}
+                  </button>
+                </div>
+                <textarea
+                  readOnly
+                  value={proofPackage}
+                  rows={6}
+                  className="w-full p-2 border border-gray-200 rounded-lg text-xs font-mono bg-gray-50 resize-none"
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  Send this JSON to the verifier. They paste it on the verifier page under "ZKP Verification".
+                </p>
+              </div>
+
+              {zkpShareUrl && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium text-gray-700">ZKP Share Link / QR</label>
+                    <button
+                      onClick={copyShareLink}
+                      className={`text-xs px-3 py-1 rounded-full transition-colors ${
+                        copiedLink ? 'bg-green-600 text-white' : 'bg-purple-200 text-purple-800 hover:bg-purple-300'
+                      }`}
+                    >
+                      {copiedLink ? '✓ Link Copied' : 'Copy Link'}
+                    </button>
+                  </div>
+
+                  <div className="flex">
+                    <input
+                      type="text"
+                      value={zkpShareUrl}
+                      readOnly
+                      className="flex-1 p-2 border border-gray-300 rounded-l-lg bg-gray-50 text-xs font-mono truncate"
+                    />
+                    <button
+                      onClick={downloadZkpQR}
+                      className="px-3 py-2 border border-l-0 border-gray-300 rounded-r-lg text-purple-700 hover:bg-purple-50"
+                    >
+                      <FaDownload />
+                    </button>
+                  </div>
+
+                  <div className="flex flex-col items-center space-y-2">
+                    <p className="text-xs text-gray-500 text-center">Scan to open verifier with this ZKP package pre-filled</p>
+                    <div className="p-3 bg-white border-2 border-purple-200 rounded-xl shadow-inner">
+                      <QRCodeSVG
+                        id="zkp-share-qr-svg"
+                        value={zkpShareUrl}
+                        size={170}
+                        bgColor="#ffffff"
+                        fgColor="#14532d"
+                        level="M"
+                        includeMargin={false}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="flex space-x-3 px-6 pb-6">
           <button
             onClick={onClose}
-            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700"
           >
             Close
           </button>
           <button
             onClick={generateZKP}
-            disabled={!selectedCredential || isGenerating}
-            className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-300"
+            disabled={!selectedCredentialId || !threshold || isGenerating}
+            className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
           >
-            {isGenerating ? 'Generating...' : 'Generate ZKP'}
+            {isGenerating ? (
+              <span className="flex items-center justify-center space-x-2">
+                <span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full"></span>
+                <span>Generating…</span>
+              </span>
+            ) : 'Generate ZKP'}
           </button>
         </div>
       </div>
@@ -714,71 +946,150 @@ function ZKPModal({ onClose, credentials }: any) {
 }
 
 // Share Modal
-function ShareModal({ onClose, credentials }: any) {
-  const [selectedCredential, setSelectedCredential] = useState('');
-  const [shareLink, setShareLink] = useState('');
+function ShareModal({ onClose, credentials, preSelectedCredential }: any) {
+  const initialId = preSelectedCredential?.id ?? '';
+  const [selectedId, setSelectedId] = useState<string>(initialId);
+  const [copied, setCopied] = useState(false);
 
-  const generateShareLink = () => {
-    if (!selectedCredential) return;
-    const cred = credentials.find((c: any) => c.id === selectedCredential);
-    const link = `https://anonhire.com/verify/${cred?.id}`;
-    setShareLink(link);
+  const cred = credentials.find((c: any) => c.id === selectedId) ?? preSelectedCredential ?? null;
+  const hash = cred?.credentialHash ?? null;
+
+  const shareUrl = hash
+    ? `${typeof window !== 'undefined' ? window.location.origin : ''}/verifier?hash=${encodeURIComponent(hash)}`
+    : '';
+
+  const copyLink = () => {
+    if (!shareUrl) return;
+    navigator.clipboard.writeText(shareUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const downloadQR = () => {
+    const svg = document.getElementById('share-qr-svg');
+    if (!svg) return;
+    const svgData = new XMLSerializer().serializeToString(svg);
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d')!;
+    const img = new Image();
+    img.onload = () => {
+      ctx.drawImage(img, 0, 0);
+      const link = document.createElement('a');
+      link.download = `credential-qr-${hash?.slice(0, 8) ?? 'share'}.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    };
+    img.src = `data:image/svg+xml;base64,${btoa(svgData)}`;
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 w-full max-w-md">
-        <h3 className="text-xl font-bold mb-4">Share Credential</h3>
-        
-        <div className="mb-4">
-          <label className="block text-sm font-medium mb-2">Select Credential</label>
-          <select
-            value={selectedCredential}
-            onChange={(e) => setSelectedCredential(e.target.value)}
-            className="w-full p-2 border rounded-lg"
-          >
-            <option value="">Choose a credential...</option>
-            {credentials.map((cred: any) => (
-              <option key={cred.id} value={cred.id}>
-                {cred.type} - {cred.issuer}
-              </option>
-            ))}
-          </select>
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+        {/* Header */}
+        <div className="flex justify-between items-center p-6 border-b">
+          <div className="flex items-center space-x-3">
+            <div className="bg-purple-100 p-2 rounded-lg">
+              <FaQrcode className="text-purple-600 text-xl" />
+            </div>
+            <h3 className="text-xl font-bold text-gray-900">Share Credential</h3>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
         </div>
 
-        {shareLink && (
-          <div className="mb-4">
-            <label className="block text-sm font-medium mb-2">Share Link</label>
-            <div className="flex">
-              <input
-                type="text"
-                value={shareLink}
-                readOnly
-                className="flex-1 p-2 border rounded-l-lg"
-              />
-              <button
-                onClick={() => navigator.clipboard.writeText(shareLink)}
-                className="px-4 py-2 bg-blue-600 text-white rounded-r-lg hover:bg-blue-700"
+        <div className="p-6 space-y-5">
+          {/* Credential selector (only if not pre-selected or multiple available) */}
+          {!preSelectedCredential && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Select Credential</label>
+              <select
+                value={selectedId}
+                onChange={(e) => setSelectedId(e.target.value)}
+                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
               >
-                Copy
+                <option value="">Choose a credential…</option>
+                {credentials.map((c: any) => (
+                  <option key={c.id} value={c.id}>
+                    {c.type} — {c.issuer} ({c.issuedAt})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Pre-selected credential info */}
+          {cred && (
+            <div className="bg-gray-50 rounded-lg p-3 flex items-center space-x-3">
+              <div className="text-2xl">{cred.type === 'ACADEMIC' ? '🎓' : cred.type === 'JOB' ? '💼' : '📋'}</div>
+              <div>
+                <p className="font-semibold text-gray-900">{cred.type} Credential</p>
+                <p className="text-sm text-gray-500">{cred.issuer} · {cred.issuedAt}</p>
+              </div>
+            </div>
+          )}
+
+          {/* QR Code */}
+          {shareUrl ? (
+            <div className="flex flex-col items-center space-y-3">
+              <p className="text-sm text-gray-600 text-center">Scan this QR code to verify the credential</p>
+              <div className="p-4 bg-white border-2 border-purple-200 rounded-xl shadow-inner">
+                <QRCodeSVG
+                  id="share-qr-svg"
+                  value={shareUrl}
+                  size={200}
+                  bgColor="#ffffff"
+                  fgColor="#1e1b4b"
+                  level="H"
+                  includeMargin={false}
+                />
+              </div>
+              <button
+                onClick={downloadQR}
+                className="flex items-center space-x-2 text-sm text-purple-600 hover:text-purple-800 transition-colors"
+              >
+                <FaDownload className="text-xs" />
+                <span>Download QR</span>
               </button>
             </div>
-          </div>
-        )}
+          ) : (
+            <div className="flex flex-col items-center py-8 text-gray-400">
+              <FaQrcode className="text-5xl mb-3" />
+              <p className="text-sm">Select a credential to generate a QR code</p>
+            </div>
+          )}
 
-        <div className="flex space-x-3">
+          {/* Share link */}
+          {shareUrl && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Share Link</label>
+              <div className="flex">
+                <input
+                  type="text"
+                  value={shareUrl}
+                  readOnly
+                  className="flex-1 p-2 border border-gray-300 rounded-l-lg bg-gray-50 text-sm font-mono truncate"
+                />
+                <button
+                  onClick={copyLink}
+                  className={`px-4 py-2 rounded-r-lg text-sm font-medium transition-colors ${
+                    copied ? 'bg-green-600 text-white' : 'bg-purple-600 text-white hover:bg-purple-700'
+                  }`}
+                >
+                  {copied ? '✓ Copied' : 'Copy'}
+                </button>
+              </div>
+              <p className="mt-1 text-xs text-gray-500">The verifier will see the credential hash pre-filled.</p>
+            </div>
+          )}
+        </div>
+
+        <div className="px-6 pb-6">
           <button
             onClick={onClose}
-            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700"
           >
             Close
-          </button>
-          <button
-            onClick={generateShareLink}
-            disabled={!selectedCredential}
-            className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-300"
-          >
-            Generate Link
           </button>
         </div>
       </div>
@@ -827,43 +1138,63 @@ function HistoryModal({ onClose }: any) {
 }
 
 // View Credential Modal
-function ViewCredentialModal({ credential, onClose, getToken, expectedAddress }: any) {
+function ViewCredentialModal({ credential, onClose }: any) {
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [detailsError, setDetailsError] = useState<string | null>(null);
   const [decrypted, setDecrypted] = useState<any>(null);
 
+  const formatHumanDate = (value: any) => {
+    if (!value) return '-';
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return String(value);
+    return d.toLocaleDateString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
+  };
+
+  const deriveExperienceMonths = (details: any) => {
+    const direct = Number(details?.experienceMonths);
+    if (Number.isFinite(direct) && direct > 0) return Math.floor(direct);
+
+    const start = details?.startDate ? new Date(details.startDate) : null;
+    const end = details?.present ? new Date() : (details?.endDate ? new Date(details.endDate) : null);
+    if (!start || !end || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) {
+      return Number.isFinite(direct) ? Math.floor(Math.max(0, direct)) : null;
+    }
+
+    const monthDiff = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
+    let months = Math.max(0, monthDiff + (end.getDate() >= start.getDate() ? 0 : -1));
+    if (end > start && months === 0) months = 1;
+    return months;
+  };
+
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
-      // Only attempt decrypt for owner and when we have a real DB id
+      // Only attempt decrypt for owner and when ciphertext is available
       if (!credential?.canDecrypt) return;
-      const dbId = credential.dbId || credential.id;
-      if (!dbId || (typeof dbId === 'string' && dbId.startsWith('0x'))) return;
+      if (!credential?.encryptedData) return;
       setLoadingDetails(true);
       setDetailsError(null);
       try {
-        const api = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001').replace(/\/$/, '');
-        const token = await getToken?.(expectedAddress);
-        if (!token) { setDetailsError('Not authenticated'); return; }
-        const res = await fetch(`${api}/api/v1/credentials/${dbId}/decrypted`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        const text = await res.text();
-        let json: any = null; try { json = JSON.parse(text); } catch {}
-        if (!res.ok) {
-          setDetailsError(json?.message || `Failed to load details (${res.status})`);
-          return;
+        const full = await decryptCredentialData(credential.encryptedData);
+        if (!cancelled) {
+          setDecrypted({
+            details: full?.credentialSubject || full,
+            full,
+          });
         }
-        if (!cancelled) setDecrypted(json?.data);
       } catch (e: any) {
-        if (!cancelled) setDetailsError(e?.message || 'Failed to load details');
+        if (!cancelled) setDetailsError(e?.message || 'Failed to decrypt details in browser');
       } finally {
         if (!cancelled) setLoadingDetails(false);
       }
     };
     load();
     return () => { cancelled = true; };
-  }, [credential?.id]);
+  }, [credential?.id, credential?.encryptedData, credential?.canDecrypt]);
 
   const effectiveDetails = decrypted?.details || credential.details;
   const renderCredentialDetails = () => {
@@ -891,6 +1222,7 @@ function ViewCredentialModal({ credential, onClose, getToken, expectedAddress }:
         </div>
       );
     } else if (credential.type === 'JOB') {
+      const derivedMonths = deriveExperienceMonths(effectiveDetails);
       return (
         <div className="space-y-4">
           <div>
@@ -898,20 +1230,28 @@ function ViewCredentialModal({ credential, onClose, getToken, expectedAddress }:
             <p className="text-gray-900">{effectiveDetails.position}</p>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
-            <p className="text-gray-900">{effectiveDetails.department}</p>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Company</label>
+            <p className="text-gray-900">{effectiveDetails.company || effectiveDetails.department || '-'}</p>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
-            <p className="text-gray-900">{effectiveDetails.startDate}</p>
+            <p className="text-gray-900">{formatHumanDate(effectiveDetails.startDate)}</p>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
-            <p className="text-gray-900">{effectiveDetails.endDate}</p>
+            <p className="text-gray-900">{effectiveDetails.present ? 'Present' : formatHumanDate(effectiveDetails.endDate)}</p>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Responsibilities</label>
-            <p className="text-gray-900">{effectiveDetails.responsibilities}</p>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Ongoing</label>
+            <p className="text-gray-900">{effectiveDetails.present ? 'Yes' : 'No'}</p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Experience (months)</label>
+            <p className="text-gray-900">{derivedMonths ?? '-'}</p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+            <p className="text-gray-900">{effectiveDetails.description || effectiveDetails.responsibilities || '-'}</p>
           </div>
         </div>
       );
@@ -992,26 +1332,20 @@ function ViewCredentialModal({ credential, onClose, getToken, expectedAddress }:
                   <button
                     type="button"
                     onClick={() => {
-                      try { localStorage.removeItem('token'); localStorage.removeItem('tokenAddress'); } catch {}
-                      // trigger reload
                       setDetailsError(null);
                       setLoadingDetails(true);
-                      // simple re-run: change dependency by calling a no-op then re-run load via effect
-                      // Easiest: directly call the loader again
+                      if (!credential?.encryptedData) {
+                        setDetailsError('Encrypted payload unavailable');
+                        setLoadingDetails(false);
+                        return;
+                      }
                       (async () => {
                         try {
-                          const api = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001').replace(/\/$/, '');
-                          const dbId = credential.dbId || credential.id;
-                          const token = await getToken?.(expectedAddress);
-                          if (!token) { setDetailsError('Not authenticated'); return; }
-                          const res = await fetch(`${api}/api/v1/credentials/${dbId}/decrypted`, { headers: { Authorization: `Bearer ${token}` } });
-                          const text = await res.text();
-                          let json: any = null; try { json = JSON.parse(text); } catch {}
-                          if (!res.ok) { setDetailsError(json?.message || `Failed to load details (${res.status})`); return; }
-                          setDecrypted(json?.data);
+                          const full = await decryptCredentialData(credential.encryptedData);
+                          setDecrypted({ details: full?.credentialSubject || full, full });
                           setDetailsError(null);
                         } catch (e: any) {
-                          setDetailsError(e?.message || 'Failed to load details');
+                          setDetailsError(e?.message || 'Failed to decrypt details in browser');
                         } finally {
                           setLoadingDetails(false);
                         }
@@ -1019,7 +1353,7 @@ function ViewCredentialModal({ credential, onClose, getToken, expectedAddress }:
                     }}
                     className="px-3 py-1 border rounded text-gray-700 hover:bg-gray-50"
                   >
-                    Re-authenticate and retry
+                    Retry decrypt
                   </button>
                 </div>
               )}

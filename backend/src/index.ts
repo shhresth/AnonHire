@@ -5,6 +5,7 @@ import express, { Application } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
+import path from 'path';
 import { errorHandler } from './middleware/errorHandler';
 import { requestLogger, securityLogger } from './middleware/requestLogger';
 import { logger, logAudit } from './utils/logger';
@@ -38,6 +39,9 @@ app.get('/health', (_req, res) => {
 
 // API Routes
 app.use('/api/v1', routes);
+
+// Public ZKP artifacts for client-side proof generation (wasm/zkey/vkey)
+app.use('/api/v1/zkp-artifacts', express.static(path.join(__dirname, '../../zkp/build')));
 
 // Error handling
 app.use(errorHandler);

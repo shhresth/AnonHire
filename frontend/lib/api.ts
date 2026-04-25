@@ -59,8 +59,8 @@ export const zkpAPI = {
 
 // Verification API
 export const verificationAPI = {
-  verifyCredential: (credentialHash: string) =>
-    api.post('/verification/verify', { credentialHash }),
+  verifyCredential: (credentialHash: string, verificationParams?: Record<string, unknown>) =>
+    api.post('/verification/verify', { credentialHash, ...(verificationParams && { verificationParams }) }),
   getVerification: (id: string) => api.get(`/verification/${id}`),
   getCredentialVerifications: (credentialId: string) =>
     api.get(`/verification/credential/${credentialId}`),
@@ -74,5 +74,4 @@ export const didAPI = {
 };
 
 export default api;
-
 

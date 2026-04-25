@@ -142,6 +142,7 @@ export const issueJobCredential = async (
     const issuerAddress = (req as any).user.address;
     const {
       subjectAddress,
+      encryptedData: encryptedDataFromClient,
       employeeName,
       position,
       startDate,
@@ -153,7 +154,9 @@ export const issueJobCredential = async (
 
     logger.info(`Issuing job credential for ${subjectAddress}`);
 
-    const credentialData = {
+    // Preferred mode: client sends already-encrypted payload.
+    // Legacy fallback: backend constructs payload and encrypts it.
+    const encryptedData = encryptedDataFromClient || encryptionService.encrypt(JSON.stringify({
       '@context': ['https://www.w3.org/2018/credentials/v1'],
       type: ['VerifiableCredential', 'JobCredential'],
       issuer: issuerAddress,
@@ -168,9 +171,7 @@ export const issueJobCredential = async (
         company: companyName,
         skills
       }
-    };
-
-    const encryptedData = encryptionService.encrypt(JSON.stringify(credentialData));
+    }));
     // Upload encrypted payload to IPFS (store ciphertext only)
     const ipfsHash = await ipfsService.uploadJSON({
       encrypted: true,
@@ -435,8 +436,18 @@ export const getSubjectCredentials = async (
 ): Promise<void> => {
   try {
     const { address } = req.params;
+    const requester = (req as any).user;
 
-    const user = await prisma.user.findUnique({ where: { address } });
+    // Only the wallet owner (or admin) can read subject credentials list.
+    if (
+      requester?.address?.toLowerCase() !== address.toLowerCase() &&
+      requester?.role !== 'ADMIN'
+    ) {
+      res.status(403).json({ success: false, message: 'Not authorized to view these credentials' });
+      return;
+    }
+
+    const user = await prisma.user.findUnique({ where: { address: address.toLowerCase() } });
     if (!user) {
       res.status(404).json({ success: false, message: 'User not found' });
       return;
@@ -468,7 +479,7 @@ export const getIssuerCredentials = async (
   try {
     const { address } = req.params;
 
-    const user = await prisma.user.findUnique({ where: { address } });
+    const user = await prisma.user.findUnique({ where: { address: address.toLowerCase() } });
     if (!user) {
       res.status(404).json({ success: false, message: 'User not found' });
       return;

@@ -10,6 +10,7 @@ const nextConfig = {
   env: {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
     NEXT_PUBLIC_CHAIN_ID: process.env.NEXT_PUBLIC_CHAIN_ID,
+    NEXT_PUBLIC_AES_SECRET_KEY: process.env.AES_SECRET_KEY,
   },
   webpack: (config) => {
     config.resolve.fallback = { 

@@ -82,6 +82,46 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 };
 
 /**
+ * Optional authentication middleware
+ * Attaches req.user when a valid bearer token is provided, otherwise continues as public.
+ */
+export const optionalAuthenticate = async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      next();
+      return;
+    }
+
+    const secret = process.env.JWT_SECRET;
+    if (!secret) {
+      logger.warn('JWT_SECRET not configured; continuing without optional auth');
+      next();
+      return;
+    }
+
+    const token = authHeader.substring(7);
+    const decoded = jwt.verify(token, secret) as JWTPayload;
+
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.userId },
+    });
+
+    if (user) {
+      (req as any).user = user;
+    }
+
+    next();
+  } catch (error: any) {
+    logger.warn('Optional authentication failed; continuing as public request', {
+      error: error.message,
+    });
+    next();
+  }
+};
+
+/**
  * Authorization middleware
  * Checks if user has required role
  */
@@ -128,4 +168,3 @@ export const generateToken = (user: { id: string; address: string; role: string 
     expiresIn: process.env.JWT_EXPIRES_IN || '7d',
   } as any);
 };
-

@@ -75,17 +75,19 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
     // Remove used nonce
     nonces.delete(normalizedAddress);
 
-    // Find or create user
+    // Find or create user (auto-register as CANDIDATE on first login)
     let user = await prisma.user.findUnique({
       where: { address: normalizedAddress },
     });
 
     if (!user) {
-      res.status(404).json({
-        success: false,
-        message: 'User not found. Please register first.',
+      user = await prisma.user.create({
+        data: {
+          address: normalizedAddress,
+          role: 'CANDIDATE',
+        },
       });
-      return;
+      logger.info(`Auto-registered new user: ${normalizedAddress} as CANDIDATE`);
     }
 
     // Generate JWT token

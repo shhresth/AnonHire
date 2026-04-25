@@ -96,6 +96,11 @@ export class BlockchainService {
     try {
       logger.info(`Issuing academic credential on-chain for ${subject}`);
 
+      // Contract requires both issuer and subject to have registered DIDs
+      const issuerAddress = await this.signer!.getAddress();
+      await this.ensureDID(issuerAddress);
+      await this.ensureDID(subject);
+
       const tx = await this.vcContract!.issueAcademicVC(subject, ipfsHash, expiresAt, {
         gasLimit: 500000,
       });
@@ -120,6 +125,11 @@ export class BlockchainService {
     
     try {
       logger.info(`Issuing job credential on-chain for ${subject}`);
+
+      // Contract requires both issuer and subject to have registered DIDs
+      const issuerAddress = await this.signer!.getAddress();
+      await this.ensureDID(issuerAddress);
+      await this.ensureDID(subject);
 
       const tx = await this.vcContract!.issueJobVC(subject, ipfsHash, expiresAt, {
         gasLimit: 500000,
@@ -147,6 +157,11 @@ export class BlockchainService {
     
     try {
       logger.info(`Issuing internship credential on-chain for ${subject}`);
+
+      // Contract requires both issuer and subject to have registered DIDs
+      const issuerAddress = await this.signer!.getAddress();
+      await this.ensureDID(issuerAddress);
+      await this.ensureDID(subject);
 
       const tx = await this.vcContract!.issueInternshipVC(subject, ipfsHash, expiresAt, {
         gasLimit: 500000,
@@ -243,6 +258,35 @@ export class BlockchainService {
     } catch (error: any) {
       logger.error('Error registering DID:', error);
       throw new Error(`DID registration failed: ${error.message}`);
+    }
+  }
+
+  /**
+   * Ensure an address has a registered DID, registering one on-chain if not.
+   * Uses the backend signer to register DIDs for subject addresses.
+   */
+  private async ensureDID(address: string): Promise<void> {
+    try {
+      const hasDID: boolean = await this.didContract!.hasDID(address);
+      if (hasDID) return;
+
+      logger.info(`Auto-registering DID for address: ${address}`);
+      const did = `did:ethr:${address.toLowerCase()}`;
+      const tx = await this.didContract!.registerDID(
+        did,
+        '-----BEGIN PUBLIC KEY-----\nANONHIRE-AUTO-KEY\n-----END PUBLIC KEY-----',
+        'https://anonhire.vercel.app/did-service',
+        { gasLimit: 300000 }
+      );
+      await tx.wait();
+      logger.info(`DID auto-registered for ${address}`);
+    } catch (error: any) {
+      // If already registered (race condition), that's fine
+      if (error?.message?.includes('already registered') || error?.message?.includes('already exists')) {
+        logger.info(`DID already exists for ${address} (race condition ok)`);
+        return;
+      }
+      throw error;
     }
   }
 

@@ -11,9 +11,9 @@
     "test:watch": "jest --watch",
     "lint": "eslint . --ext .ts",
     "format": "prettier --write \"src/**/*.ts\"",
-    "migrate": "dotenv -e ../.env prisma migrate dev",
-    "db:push": "dotenv -e ../.env prisma db push",
-    "db:seed": "dotenv -e ../.env ts-node prisma/seed.ts"
+    "migrate": "set -a && . ../.env && set +a && prisma migrate dev",
+    "db:push": "set -a && . ../.env && set +a && prisma db push",
+    "db:seed": "set -a && . ../.env && set +a && ts-node prisma/seed.ts"
   },
   "keywords": [],
   "author": "",
@@ -63,5 +63,4 @@
     "typescript": "^5.3.3"
   }
 }
-
 

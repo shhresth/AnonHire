@@ -56,12 +56,26 @@ router.post(
   bypassAuthorize(['EMPLOYER', 'ADMIN']),
   [
     body('subjectAddress').isEthereumAddress().withMessage('Invalid Ethereum address'),
-    body('employeeName').notEmpty().withMessage('Employee name is required'),
-    body('position').notEmpty().withMessage('Position is required'),
-    body('startDate').isISO8601().withMessage('Invalid start date'),
-    body('endDate').isISO8601().withMessage('Invalid end date'),
-    body('experienceMonths').isInt({ min: 0 }).withMessage('Invalid experience'),
-    body('skills').isArray().withMessage('Skills must be an array')
+    body('encryptedData').optional().isString().withMessage('Encrypted data must be a string'),
+    body().custom((value) => {
+      // New mode: frontend sends encryptedData only.
+      if (value?.encryptedData) return true;
+
+      // Legacy mode: backend builds/encrypts payload from plaintext fields.
+      if (!value?.employeeName) throw new Error('Employee name is required');
+      if (!value?.position) throw new Error('Position is required');
+      if (!value?.startDate) throw new Error('Start date is required');
+      if (!value?.endDate) throw new Error('End date is required');
+      if (value?.experienceMonths === undefined || value?.experienceMonths === null) {
+        throw new Error('Experience months is required');
+      }
+      if (!Array.isArray(value?.skills)) throw new Error('Skills must be an array');
+      return true;
+    }),
+    body('startDate').optional().isISO8601().withMessage('Invalid start date'),
+    body('endDate').optional().isISO8601().withMessage('Invalid end date'),
+    body('experienceMonths').optional().isInt({ min: 0 }).withMessage('Invalid experience'),
+    body('skills').optional().isArray().withMessage('Skills must be an array')
   ],
   validate,
   credentialController.issueJobCredential

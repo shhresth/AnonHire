@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useToast } from '@/components/Toast';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { FaCheck, FaTimes, FaSearch, FaShieldAlt, FaArrowLeft, FaCopy, FaExternalLinkAlt, FaGraduationCap, FaBriefcase, FaUserTie, FaExclamationTriangle, FaCheckCircle, FaClock, FaQrcode, FaHistory } from 'react-icons/fa';
@@ -8,7 +9,46 @@ import Link from 'next/link';
 import TopNav from '@/components/TopNav';
 
 export default function VerifierPage() {
+  const searchParams = useSearchParams();
   const [credentialHash, setCredentialHash] = useState('');
+  const [hashFromQR, setHashFromQR] = useState(false);
+  const [zkpFromQR, setZkpFromQR] = useState(false);
+
+  const decodeZkpFromParam = (value: string) => {
+    const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
+    const pad = normalized.length % 4;
+    const padded = pad ? normalized + '='.repeat(4 - pad) : normalized;
+    const json = decodeURIComponent(escape(atob(padded)));
+    JSON.parse(json); // sanity-check
+    return json;
+  };
+
+  // Auto-fill from QR/share links:
+  // - standard: ?hash=0x...
+  // - zkp: ?zkp=<base64url-encoded-json>
+  useEffect(() => {
+    const zkpParam = searchParams.get('zkp');
+    if (zkpParam) {
+      try {
+        const decodedProofJson = decodeZkpFromParam(zkpParam);
+        setVerifyMode('zkp');
+        setZkpProofText(decodedProofJson);
+        setZkpFromQR(true);
+        setShowZkpJsonEditor(false);
+        setHashFromQR(false);
+        return;
+      } catch {
+        // fall through and try hash mode
+      }
+    }
+
+    const hashParam = searchParams.get('hash');
+    if (hashParam) {
+      setCredentialHash(hashParam);
+      setHashFromQR(true);
+      setZkpFromQR(false);
+    }
+  }, [searchParams]);
   const [verificationResult, setVerificationResult] = useState<any>(null);
   const [isVerifying, setIsVerifying] = useState(false);
   const [verificationHistory, setVerificationHistory] = useState<any[]>([]);
@@ -23,6 +63,11 @@ export default function VerifierPage() {
     requiredSkills: [] as string[]
   });
   const [newSkill, setNewSkill] = useState('');
+  const [verifyMode, setVerifyMode] = useState<'standard' | 'zkp'>('standard');
+  const [zkpProofText, setZkpProofText] = useState('');
+  const [showZkpJsonEditor, setShowZkpJsonEditor] = useState(true);
+  const [zkpResult, setZkpResult] = useState<any>(null);
+  const [isVerifyingZKP, setIsVerifyingZKP] = useState(false);
   const { showToast } = useToast();
 
   const handleVerify = async () => {
@@ -46,7 +91,7 @@ export default function VerifierPage() {
           }
         };
         
-        response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/verification/verify-with-params`, {
+        response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/verification/verify`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -99,6 +144,53 @@ export default function VerifierPage() {
            verificationParams.requiredSkills.length > 0;
   };
 
+  const handleVerifyZKP = async () => {
+    if (!zkpProofText.trim()) return;
+    setIsVerifyingZKP(true);
+    setZkpResult(null);
+    try {
+      let parsed: any;
+      try {
+        parsed = JSON.parse(zkpProofText);
+      } catch {
+        showToast('Invalid JSON — paste the full proof package from the candidate', 'error');
+        setIsVerifyingZKP(false);
+        return;
+      }
+
+      const { proof, publicSignals, proofType } = parsed;
+      if (!proof || !publicSignals) {
+        showToast('Proof package must contain "proof" and "publicSignals"', 'error');
+        setIsVerifyingZKP(false);
+        return;
+      }
+
+      const isGPA = proofType === 'gpa' || proofType === 'gpa_proof';
+      const endpoint = isGPA
+        ? `${process.env.NEXT_PUBLIC_API_URL}/api/v1/zkp/gpa/verify`
+        : `${process.env.NEXT_PUBLIC_API_URL}/api/v1/zkp/experience/verify`;
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ proof, publicSignals }),
+      });
+
+      const json = await res.json();
+      setZkpResult({ ...json?.data, proofType: isGPA ? 'gpa' : 'experience' });
+
+      if (json?.data?.isValid && json?.data?.circuitValid) {
+        showToast('ZKP verified successfully!', 'success');
+      } else {
+        showToast('ZKP verification failed', 'error');
+      }
+    } catch (e: any) {
+      showToast(e.message || 'Verification request failed', 'error');
+    } finally {
+      setIsVerifyingZKP(false);
+    }
+  };
+
   const addSkill = () => {
     if (newSkill.trim() && !verificationParams.requiredSkills.includes(newSkill.trim())) {
       setVerificationParams(prev => ({
@@ -141,6 +233,15 @@ export default function VerifierPage() {
     showToast(`${label} copied to clipboard`, 'success');
   };
 
+  const handleVerificationSubmit = async () => {
+    if (verifyMode === 'zkp') {
+      await handleVerifyZKP();
+      return;
+    }
+
+    await handleVerify();
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
       {/* Header */}
@@ -175,6 +276,54 @@ export default function VerifierPage() {
             <div className="text-gray-600">Average Time</div>
           </div>
         </div>
+
+        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900">Verification Mode</h3>
+              <p className="text-sm text-gray-600">
+                Toggle ZKP mode to verify a candidate proof instead of running backend credential checks.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setVerifyMode((prev) => prev === 'zkp' ? 'standard' : 'zkp')}
+              aria-pressed={verifyMode === 'zkp'}
+              className={`relative inline-flex h-8 w-16 items-center rounded-full transition-colors ${
+                verifyMode === 'zkp' ? 'bg-green-600' : 'bg-blue-600'
+              }`}
+            >
+              <span className="sr-only">Toggle zero-knowledge proof verification</span>
+              <span
+                className={`inline-block h-6 w-6 transform rounded-full bg-white transition-transform ${
+                  verifyMode === 'zkp' ? 'translate-x-9' : 'translate-x-1'
+                }`}
+              />
+            </button>
+          </div>
+          <div className="mt-4 flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm">
+            <span className={verifyMode === 'standard' ? 'font-semibold text-blue-700' : 'text-gray-500'}>
+              Standard
+            </span>
+            <span className={verifyMode === 'zkp' ? 'font-semibold text-green-700' : 'text-gray-500'}>
+              ZKP
+            </span>
+          </div>
+        </div>
+
+        {verifyMode === 'zkp' && (
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
+            <h3 className="font-semibold text-green-900 mb-1">Zero-Knowledge Proof Verification</h3>
+            <p className="text-sm text-green-800">
+              The candidate generates a cryptographic proof from their wallet. Verification checks the proof itself,
+              not the decrypted credential payload.
+            </p>
+          </div>
+        )}
+
+        {/* Standard Verification (shown only in standard mode) */}
+        {verifyMode === 'standard' && (
+          <div>
 
         {/* Parameter Verification Toggle */}
         <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
@@ -333,10 +482,14 @@ export default function VerifierPage() {
           </div>
         )}
 
+          </div>
+        )}
         {/* Verification Form */}
         <div className="bg-white rounded-lg shadow-lg p-8 mb-8">
           <div className="flex justify-between items-center mb-6">
-            <h3 className="text-2xl font-bold text-gray-900">Verify Credential</h3>
+            <h3 className="text-2xl font-bold text-gray-900">
+              {verifyMode === 'zkp' ? 'Verify Zero-Knowledge Proof' : 'Verify Credential'}
+            </h3>
             <div className="flex space-x-2">
               <button
                 onClick={() => setShowHistory(!showHistory)}
@@ -346,7 +499,13 @@ export default function VerifierPage() {
                 <span>History</span>
               </button>
               <button
-                onClick={() => setCredentialHash('')}
+                onClick={() => {
+                  setCredentialHash('');
+                  setZkpProofText('');
+                  setShowZkpJsonEditor(true);
+                  setHashFromQR(false);
+                  setZkpFromQR(false);
+                }}
                 className="px-4 py-2 text-gray-600 hover:text-red-600 transition-colors"
               >
                 Clear
@@ -355,39 +514,122 @@ export default function VerifierPage() {
           </div>
           
           <div className="space-y-4">
-            <div>
-              <label htmlFor="credentialHash" className="block text-sm font-medium text-gray-700 mb-2">
-                Credential Hash
-              </label>
-              <div className="relative">
-                <input
-                  type="text"
-                  id="credentialHash"
-                  value={credentialHash}
-                  onChange={(e) => setCredentialHash(e.target.value)}
-                  placeholder="Enter the credential hash to verify (0x...)"
-                  className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono text-sm"
-                />
-                <button
-                  onClick={() => copyToClipboard(credentialHash, 'Hash')}
-                  disabled={!credentialHash}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 disabled:opacity-50"
-                >
-                  <FaCopy />
-                </button>
+            {verifyMode === 'standard' ? (
+              <div>
+                <label htmlFor="credentialHash" className="block text-sm font-medium text-gray-700 mb-2">
+                  Credential Hash
+                  {hashFromQR && (
+                    <span className="ml-2 inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
+                      <FaQrcode className="text-xs" />
+                      <span>Pre-filled from QR</span>
+                    </span>
+                  )}
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    id="credentialHash"
+                    value={credentialHash}
+                    onChange={(e) => { setCredentialHash(e.target.value); setHashFromQR(false); }}
+                    placeholder="Enter the credential hash to verify (0x...)"
+                    className={`w-full px-4 py-3 pr-12 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono text-sm ${
+                      hashFromQR ? 'border-purple-400 bg-purple-50' : 'border-gray-300'
+                    }`}
+                  />
+                  <button
+                    onClick={() => copyToClipboard(credentialHash, 'Hash')}
+                    disabled={!credentialHash}
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 disabled:opacity-50"
+                  >
+                    <FaCopy />
+                  </button>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  {hashFromQR
+                    ? 'Hash loaded from QR code — click Verify to check this credential.'
+                    : 'Enter the full credential hash provided by the candidate'}
+                </p>
               </div>
-              <p className="text-xs text-gray-500 mt-1">
-                Enter the full credential hash provided by the candidate
-              </p>
-            </div>
+            ) : (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Proof JSON
+                  {zkpFromQR && (
+                    <span className="ml-2 inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                      <FaQrcode className="text-xs" />
+                      <span>Pre-filled from QR</span>
+                    </span>
+                  )}
+                </label>
+                {zkpFromQR && !showZkpJsonEditor ? (
+                  <div className="w-full px-4 py-3 border border-green-300 bg-green-50 rounded-lg">
+                    <p className="text-sm text-green-800 font-medium">Proof package loaded from QR/share link.</p>
+                    <p className="text-xs text-green-700 mt-1">JSON hidden for a simpler experience.</p>
+                    <button
+                      type="button"
+                      onClick={() => setShowZkpJsonEditor(true)}
+                      className="mt-2 text-xs px-3 py-1 rounded-full bg-green-200 text-green-900 hover:bg-green-300"
+                    >
+                      Show JSON details
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <textarea
+                      value={zkpProofText}
+                      onChange={(e) => { setZkpProofText(e.target.value); setZkpFromQR(false); setShowZkpJsonEditor(true); }}
+                      placeholder={'{\n  "proofType": "gpa",\n  "proof": { ... },\n  "publicSignals": [ ... ],\n  "threshold": 3.5\n}'}
+                      rows={8}
+                      className={`w-full px-4 py-3 border rounded-lg font-mono text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent ${
+                        zkpFromQR ? 'border-green-400 bg-green-50' : 'border-gray-300'
+                      }`}
+                    />
+                    {zkpFromQR && (
+                      <div className="mt-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowZkpJsonEditor(false)}
+                          className="text-xs px-3 py-1 rounded-full bg-gray-200 text-gray-800 hover:bg-gray-300"
+                        >
+                          Hide JSON details
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+                <p className="mt-1 text-xs text-gray-500">
+                  {zkpFromQR
+                    ? 'Proof package loaded from QR/share link — click Verify ZKP.'
+                    : 'Paste the full proof package generated by the candidate wallet.'}
+                </p>
+              </div>
+            )}
             
             <div className="flex space-x-4">
               <button
-                onClick={handleVerify}
-                disabled={!credentialHash || isVerifying}
-                className="flex-1 bg-blue-600 text-white py-3 px-6 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+                onClick={handleVerificationSubmit}
+                disabled={
+                  verifyMode === 'zkp'
+                    ? !zkpProofText.trim() || isVerifyingZKP
+                    : !credentialHash || isVerifying
+                }
+                className={`flex-1 text-white py-3 px-6 rounded-lg disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center space-x-2 ${
+                  verifyMode === 'zkp' ? 'bg-green-600 hover:bg-green-700' : 'bg-blue-600 hover:bg-blue-700'
+                }`}
               >
-                {isVerifying ? (
+                {verifyMode === 'zkp' ? (
+                  isVerifyingZKP ? (
+                    <>
+                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                      <span>Verifying proof...</span>
+                    </>
+                  ) : (
+                    <>
+                      <FaShieldAlt />
+                      <span>Verify ZKP</span>
+                    </>
+                  )
+                ) : isVerifying ? (
                   <>
                     <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
                     <span>Verifying...</span>
@@ -400,15 +642,124 @@ export default function VerifierPage() {
                 )}
               </button>
               <button
-                onClick={() => {/* QR Code functionality */}}
-                className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 flex items-center space-x-2"
+                onClick={async () => {
+                  try {
+                    const text = await navigator.clipboard.readText();
+                    const zkpMatch = text.match(/[?&]zkp=([^&\s]+)/);
+                    const hashMatch = text.match(/[?&]hash=([^&\s]+)/);
+
+                    if (zkpMatch) {
+                      const decodedProofJson = decodeZkpFromParam(decodeURIComponent(zkpMatch[1]));
+                      setVerifyMode('zkp');
+                      setZkpProofText(decodedProofJson);
+                      setZkpFromQR(true);
+                      setShowZkpJsonEditor(false);
+                      setHashFromQR(false);
+                      showToast('ZKP package extracted from share URL', 'success');
+                      return;
+                    }
+
+                    if (hashMatch) {
+                      setVerifyMode('standard');
+                      setCredentialHash(decodeURIComponent(hashMatch[1]));
+                      setHashFromQR(true);
+                      setZkpFromQR(false);
+                      showToast('Hash extracted from share URL', 'success');
+                      return;
+                    }
+
+                    if (text.trim().startsWith('0x')) {
+                      setVerifyMode('standard');
+                      setCredentialHash(text.trim());
+                      setHashFromQR(true);
+                      setZkpFromQR(false);
+                      showToast('Hash pasted from clipboard', 'success');
+                      return;
+                    }
+
+                    try {
+                      const parsed = JSON.parse(text);
+                      if (parsed?.proof && parsed?.publicSignals) {
+                        setVerifyMode('zkp');
+                        setZkpProofText(JSON.stringify(parsed, null, 2));
+                        setZkpFromQR(false);
+                        setShowZkpJsonEditor(true);
+                        setHashFromQR(false);
+                        showToast('ZKP JSON pasted from clipboard', 'success');
+                        return;
+                      }
+                    } catch {}
+
+                    showToast('Clipboard does not contain a valid hash, ZKP JSON, or share URL', 'error');
+                  } catch {
+                    showToast('Cannot read clipboard. Paste the share link manually.', 'error');
+                  }
+                }}
+                className="px-6 py-3 border border-purple-300 text-purple-700 rounded-lg hover:bg-purple-50 flex items-center space-x-2"
               >
                 <FaQrcode />
-                <span>Scan QR</span>
+                <span>Paste QR Link</span>
               </button>
             </div>
           </div>
         </div>
+
+        {/* ZKP Result */}
+        {verifyMode === 'zkp' && zkpResult && (
+          <div className="bg-white rounded-lg shadow-lg p-8">
+            <h3 className="text-xl font-bold text-gray-900 mb-6">ZKP Verification Result</h3>
+
+            {zkpResult.isValid && zkpResult.circuitValid ? (
+                  <div className="space-y-4">
+                    <div className="flex items-center space-x-3 p-4 bg-green-50 border border-green-200 rounded-lg">
+                      <FaCheckCircle className="text-green-600 text-3xl flex-shrink-0" />
+                      <div>
+                        <p className="font-bold text-green-800 text-lg">Zero-Knowledge Proof Valid ✅</p>
+                        <p className="text-green-700 text-sm mt-1">{zkpResult.message}</p>
+                      </div>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-4 grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <span className="font-medium text-gray-600">Proof Type:</span>
+                        <span className="ml-2 text-gray-900 capitalize">{zkpResult.proofType}</span>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-600">
+                          {zkpResult.proofType === 'gpa' ? 'GPA Threshold:' : 'Experience Threshold:'}
+                        </span>
+                        <span className="ml-2 font-bold text-green-700">
+                          {zkpResult.proofType === 'gpa'
+                            ? `≥ ${zkpResult.threshold} GPA`
+                            : `≥ ${zkpResult.threshold} months`}
+                        </span>
+                      </div>
+                      <div className="col-span-2">
+                        <span className="font-medium text-gray-600">Privacy:</span>
+                        <span className="ml-2 text-gray-700">
+                          The actual {zkpResult.proofType === 'gpa' ? 'GPA' : 'experience duration'} was <strong>not revealed</strong> — only that the threshold was met.
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ) : zkpResult.isValid && !zkpResult.circuitValid ? (
+                  <div className="flex items-center space-x-3 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                    <FaExclamationTriangle className="text-yellow-600 text-3xl flex-shrink-0" />
+                    <div>
+                      <p className="font-bold text-yellow-800">Threshold Not Met</p>
+                      <p className="text-yellow-700 text-sm mt-1">{zkpResult.message}</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center space-x-3 p-4 bg-red-50 border border-red-200 rounded-lg">
+                    <FaTimes className="text-red-600 text-3xl flex-shrink-0" />
+                    <div>
+                      <p className="font-bold text-red-800">Invalid Proof</p>
+                      <p className="text-red-700 text-sm mt-1">{zkpResult.message}</p>
+                    </div>
+                  </div>
+                )}
+          </div>
+        )}
 
         {/* Verification History */}
         {showHistory && verificationHistory.length > 0 && (
@@ -437,7 +788,7 @@ export default function VerifierPage() {
         )}
 
         {/* Verification Result */}
-        {verificationResult && (
+        {verifyMode === 'standard' && verificationResult && (
           <div className="bg-white rounded-lg shadow-lg p-8">
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-2xl font-bold text-gray-900">Verification Result</h3>
@@ -516,8 +867,8 @@ export default function VerifierPage() {
                               </div>
                             </div>
                             <div className="text-right">
-                              <p className="text-sm font-medium text-gray-900">Required: {result.required}</p>
-                              <p className="text-sm text-gray-600">Actual: {result.actual}</p>
+                              <p className="text-sm font-medium text-gray-900">Required: {Array.isArray(result.required) ? result.required.join(', ') : String(result.required ?? '')}</p>
+                              <p className="text-sm text-gray-600">Actual: {Array.isArray(result.actual) ? result.actual.join(', ') : String(result.actual ?? '')}</p>
                             </div>
                           </div>
                         ))}
@@ -553,7 +904,12 @@ export default function VerifierPage() {
                       {verificationResult?.data?.credential?.publicSummary && (
                         <div>
                           <span className="text-sm font-medium text-gray-600">Summary:</span>
-                          <p className="text-sm text-gray-700 mt-1">{verificationResult.data.credential.publicSummary}</p>
+                          <p className="text-sm text-gray-700 mt-1">
+                            {typeof verificationResult.data.credential.publicSummary === 'string'
+                              ? verificationResult.data.credential.publicSummary
+                              : `${verificationResult.data.credential.publicSummary.type ?? ''} credential issued by ${verificationResult.data.credential.publicSummary.issuer ?? ''}`
+                            }
+                          </p>
                         </div>
                       )}
                     </div>
@@ -646,13 +1002,23 @@ export default function VerifierPage() {
         {/* Instructions */}
         <div className="bg-blue-50 rounded-lg p-6 mt-8">
           <h3 className="text-lg font-semibold text-blue-900 mb-3">How to Verify Credentials</h3>
-          <ol className="list-decimal list-inside space-y-2 text-blue-800">
-            <li>Ask the candidate to provide their credential hash</li>
-            <li>Enter the hash in the field above</li>
-            <li>Click "Verify Credential" to check authenticity</li>
-            <li>View the verification result and credential details</li>
-          </ol>
+          {verifyMode === 'zkp' ? (
+            <ol className="list-decimal list-inside space-y-2 text-blue-800">
+              <li>Ask the candidate to generate a proof package from their wallet</li>
+              <li>Toggle ZKP mode on</li>
+              <li>Paste the proof JSON in the form above</li>
+              <li>Click "Verify ZKP" to validate the proof</li>
+            </ol>
+          ) : (
+            <ol className="list-decimal list-inside space-y-2 text-blue-800">
+              <li>Ask the candidate to provide their credential hash</li>
+              <li>Enter the hash in the field above</li>
+              <li>Click "Verify Credential" to check authenticity</li>
+              <li>View the verification result and credential details</li>
+            </ol>
+          )}
         </div>
+
       </main>
     </div>
   );

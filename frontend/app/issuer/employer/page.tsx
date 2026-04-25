@@ -7,6 +7,7 @@ import Link from 'next/link';
 import TopNav from '@/components/TopNav';
 import { useToast } from '@/components/Toast';
 import { ethers } from 'ethers';
+import { encryptCredentialData } from '@/lib/client-zkp';
 
 export default function EmployerIssuerPage() {
   const { showToast } = useToast();
@@ -94,6 +95,43 @@ export default function EmployerIssuerPage() {
     setIsIssuing(true);
     
     try {
+      const start = new Date(formData.startDate);
+      const present = Boolean(formData.isCurrent);
+      const end = present ? new Date() : new Date(formData.endDate);
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+        throw new Error('Invalid start/end date');
+      }
+      if (end < start) {
+        throw new Error('End date cannot be earlier than start date');
+      }
+
+      const monthDiff = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
+      let experienceMonths = Math.max(0, monthDiff + (end.getDate() >= start.getDate() ? 0 : -1));
+      if (end > start && experienceMonths === 0) {
+        experienceMonths = 1;
+      }
+
+      const credentialData = {
+        '@context': ['https://www.w3.org/2018/credentials/v1'],
+        type: ['VerifiableCredential', 'JobCredential'],
+        issuanceDate: new Date().toISOString(),
+        credentialSubject: {
+          id: formData.subjectAddress,
+          name: formData.employeeName,
+          position: formData.position,
+          company: formData.companyName,
+          startDate: start.toISOString(),
+          endDate: present ? null : end.toISOString(),
+          present,
+          experienceMonths,
+          description: formData.description,
+          responsibilities: formData.description,
+          skills: [],
+        },
+      };
+
+      const encryptedData = await encryptCredentialData(credentialData);
+
       let token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
       if (!token) {
         token = await ensureBackendAuth();
@@ -108,13 +146,7 @@ export default function EmployerIssuerPage() {
         },
         body: JSON.stringify({
           subjectAddress: formData.subjectAddress,
-          employeeName: formData.employeeName,
-          position: formData.position,
-          startDate: new Date(formData.startDate).toISOString(),
-          endDate: formData.isCurrent ? new Date().toISOString() : new Date(formData.endDate).toISOString(),
-          experienceMonths: 0,
-          companyName: formData.companyName,
-          skills: [],
+          encryptedData,
         }),
       });
       

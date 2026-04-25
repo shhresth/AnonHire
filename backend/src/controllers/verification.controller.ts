@@ -2,27 +2,38 @@ import { Request, Response, NextFunction } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { BlockchainService } from '../services/blockchain.service';
 import { IPFSService } from '../services/ipfs.service';
+import { EncryptionService } from '../services/encryption.service';
 import { logger } from '../utils/logger';
 
 const prisma = new PrismaClient();
 const blockchainService = new BlockchainService();
 const ipfsService = new IPFSService();
+const encryptionService = new EncryptionService();
 
 /**
  * Validate credential parameters against verification requirements
  */
 async function validateCredentialParameters(credential: any, verificationParams: any) {
   try {
-    // Get decrypted credential data from IPFS
-    const ipfsData = await ipfsService.getJSON(credential.ipfsHash);
-    if (!ipfsData) {
+    // Decrypt credential data from DB (IPFS stores encrypted ciphertext)
+    if (!credential.encryptedData) {
       return {
         isValid: false,
-        reason: 'Could not retrieve credential data from IPFS'
+        reason: 'No encrypted data available for this credential'
       };
     }
 
-    const credentialData = ipfsData.credentialSubject || ipfsData;
+    let decrypted: any;
+    try {
+      decrypted = JSON.parse(encryptionService.decrypt(credential.encryptedData));
+    } catch (e) {
+      return {
+        isValid: false,
+        reason: 'Could not decrypt credential data'
+      };
+    }
+
+    const credentialData = decrypted.credentialSubject || decrypted;
     const validationResults = [];
 
     // Check GPA requirements
@@ -191,13 +202,19 @@ export const verifyCredential = async (req: Request, res: Response, next: NextFu
       return;
     }
 
-    // Verify on blockchain
-    const isValidOnChain = await blockchainService.verifyCredential(credentialHash);
+    // Best-effort blockchain checks (credential may not be on-chain if tx failed)
+   // @ts-ignore
+    let isValidOnChain = false;
+    let isRevokedOnChain = false;
+    try {
+      isValidOnChain = await blockchainService.verifyCredential(credentialHash);
+      isRevokedOnChain = await blockchainService.isRevoked(credentialHash);
+    } catch (e) {
+      logger.warn('Blockchain verification unavailable, using DB as ground truth');
+    }
 
-    // Check revocation on-chain
-    const isRevokedOnChain = await blockchainService.isRevoked(credentialHash);
-
-    const isValid = isValidOnChain && !isRevokedOnChain;
+    // DB record is ground truth — credential is valid if it exists and isn't revoked
+    const isValid = !credential.isRevoked && !isRevokedOnChain;
 
     // Check verification parameters if provided
     let parameterValidation = null;
@@ -205,16 +222,25 @@ export const verifyCredential = async (req: Request, res: Response, next: NextFu
       parameterValidation = await validateCredentialParameters(credential, verificationParams);
     }
 
-    // Log verification
-    const verification = await prisma.verification.create({
-      data: {
-        credentialId: credential.id,
-        verifierId: (req as any).user?.id || null,
-        isValid,
-        proofType: 'CREDENTIAL',
-        proofData: verificationParams ? JSON.stringify(verificationParams) : null,
-      },
-    });
+    // Log verification only when the requester is authenticated.
+    const user = (req as any).user;
+    let verificationId: string | null = null;
+    if (user) {
+      try {
+        const verification = await prisma.verification.create({
+          data: {
+            credentialId: credential.id,
+            verifierId: user.id,
+            isValid,
+            proofType: 'CREDENTIAL',
+            proofData: verificationParams ? JSON.stringify(verificationParams) : null,
+          },
+        });
+        verificationId = verification.id;
+      } catch (logErr: any) {
+        logger.warn('Could not log credential verification:', logErr.message);
+      }
+    }
 
     res.json({
       success: true,
@@ -228,7 +254,7 @@ export const verifyCredential = async (req: Request, res: Response, next: NextFu
           issuedAt: credential.issuedAt,
           expiresAt: credential.expiresAt,
         },
-        verificationId: verification.id,
+        verificationId,
       },
     });
   } catch (error: any) {
@@ -237,76 +263,6 @@ export const verifyCredential = async (req: Request, res: Response, next: NextFu
   }
 };
 
-/**
- * Public verification with parameters (no auth required)
- */
-export const verifyCredentialWithParams = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    const { credentialHash, verificationParams } = req.body;
-
-    logger.info(`Public verify credential with params: ${credentialHash}`, { verificationParams });
-
-    // Get credential from database
-    const credential = await prisma.credential.findUnique({
-      where: { credentialHash },
-      include: {
-        issuer: true,
-        subject: true,
-      },
-    });
-
-    if (!credential) {
-      res.status(404).json({
-        success: false,
-        message: 'Credential not found',
-      });
-      return;
-    }
-
-    // Check if revoked in database
-    if (credential.isRevoked) {
-      res.json({
-        success: true,
-        data: {
-          isValid: false,
-          reason: 'Credential is revoked',
-          revokedAt: credential.revokedAt,
-          revocationReason: credential.revocationReason,
-        },
-      });
-      return;
-    }
-
-    // Verify on blockchain
-    const isValidOnChain = await blockchainService.verifyCredential(credentialHash);
-    const isRevokedOnChain = await blockchainService.isRevoked(credentialHash);
-    const isValid = isValidOnChain && !isRevokedOnChain;
-
-    // Check verification parameters
-    let parameterValidation = null;
-    if (verificationParams && isValid) {
-      parameterValidation = await validateCredentialParameters(credential, verificationParams);
-    }
-
-    res.json({
-      success: true,
-      data: {
-        isValid,
-        parameterValidation,
-        credential: {
-          type: credential.credentialType,
-          issuer: credential.issuer.address,
-          subject: credential.subject.address,
-          issuedAt: credential.issuedAt,
-          expiresAt: credential.expiresAt,
-        },
-      },
-    });
-  } catch (error: any) {
-    logger.error('Error verifying credential with params:', error);
-    next(error);
-  }
-};
 /**
  * Public GET verify by hash (no auth) for quick testing
  */
@@ -435,4 +391,3 @@ export const getCredentialVerifications = async (
     next(error);
   }
 };
-

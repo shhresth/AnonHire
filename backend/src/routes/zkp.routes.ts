@@ -8,15 +8,15 @@ const router = Router();
 
 /**
  * @route   POST /api/v1/zkp/gpa/generate
- * @desc    Generate GPA proof
+ * @desc    Generate GPA proof (raw values — caller supplies gpa + threshold)
  * @access  Private
  */
 router.post(
   '/gpa/generate',
   authenticate,
   [
-    body('gpa').isFloat({ min: 0, max: 4 }).withMessage('Invalid GPA'),
-    body('threshold').isFloat({ min: 0, max: 4 }).withMessage('Invalid threshold'),
+    body('gpa').isFloat({ min: 0, max: 10 }).withMessage('GPA must be between 0 and 10'),
+    body('threshold').isFloat({ min: 0, max: 10 }).withMessage('Threshold must be between 0 and 10'),
     body('credentialHash').notEmpty().withMessage('Credential hash is required'),
   ],
   validate,
@@ -24,13 +24,28 @@ router.post(
 );
 
 /**
+ * @route   POST /api/v1/zkp/gpa/generate-from-credential
+ * @desc    Generate GPA proof from an owned credential (decrypts internally — GPA never leaves server)
+ * @access  Private (candidate must own the credential)
+ */
+router.post(
+  '/gpa/generate-from-credential',
+  authenticate,
+  [
+    body('credentialId').notEmpty().withMessage('Credential ID is required'),
+    body('threshold').isFloat({ min: 0, max: 10 }).withMessage('Threshold must be between 0 and 10'),
+  ],
+  validate,
+  zkpController.generateGPAProofFromCredential
+);
+
+/**
  * @route   POST /api/v1/zkp/gpa/verify
- * @desc    Verify GPA proof
- * @access  Private
+ * @desc    Verify GPA proof — public endpoint, no auth required
+ * @access  Public
  */
 router.post(
   '/gpa/verify',
-  authenticate,
   [
     body('proof').notEmpty().withMessage('Proof is required'),
     body('publicSignals').isArray().withMessage('Public signals must be an array'),
@@ -41,7 +56,7 @@ router.post(
 
 /**
  * @route   POST /api/v1/zkp/experience/generate
- * @desc    Generate experience proof
+ * @desc    Generate experience proof (raw values)
  * @access  Private
  */
 router.post(
@@ -57,13 +72,28 @@ router.post(
 );
 
 /**
+ * @route   POST /api/v1/zkp/experience/generate-from-credential
+ * @desc    Generate experience proof from an owned credential (decrypts internally)
+ * @access  Private (candidate must own the credential)
+ */
+router.post(
+  '/experience/generate-from-credential',
+  authenticate,
+  [
+    body('credentialId').notEmpty().withMessage('Credential ID is required'),
+    body('requiredMonths').isInt({ min: 0 }).withMessage('Required months must be a non-negative integer'),
+  ],
+  validate,
+  zkpController.generateExperienceProofFromCredential
+);
+
+/**
  * @route   POST /api/v1/zkp/experience/verify
- * @desc    Verify experience proof
- * @access  Private
+ * @desc    Verify experience proof — public endpoint, no auth required
+ * @access  Public
  */
 router.post(
   '/experience/verify',
-  authenticate,
   [
     body('proof').notEmpty().withMessage('Proof is required'),
     body('publicSignals').isArray().withMessage('Public signals must be an array'),
