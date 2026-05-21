@@ -37,19 +37,19 @@ template ExperienceProof() {
     
     // Constraint: Experience must be in valid range
     component expRangeCheck = LessEqThan(32);
-    expRangeCheck.in[0] = experienceMonths;
-    expRangeCheck.in[1] = MAX_EXPERIENCE;
+    expRangeCheck.in[0] <== experienceMonths;
+    expRangeCheck.in[1] <== MAX_EXPERIENCE;
     expRangeCheck.out === 1;
     
     component expMinCheck = GreaterEqThan(32);
-    expMinCheck.in[0] = experienceMonths;
-    expMinCheck.in[1] = MIN_EXPERIENCE;
+    expMinCheck.in[0] <== experienceMonths;
+    expMinCheck.in[1] <== MIN_EXPERIENCE;
     expMinCheck.out === 1;
     
     // Check if experience >= required
     component expCheck = GreaterEqThan(32);
-    expCheck.in[0] = experienceMonths;
-    expCheck.in[1] = requiredMonths;
+    expCheck.in[0] <== experienceMonths;
+    expCheck.in[1] <== requiredMonths;
     valid <== expCheck.out;
     
     // Compute commitment using Poseidon hash
@@ -63,5 +63,4 @@ template ExperienceProof() {
 }
 
 component main {public [requiredMonths, expectedCommitment]} = ExperienceProof();
-
 

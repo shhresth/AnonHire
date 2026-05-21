@@ -6,6 +6,8 @@ import { logger } from '../utils/logger';
 
 export class ZKPService {
   private zkpDir: string;
+  private static readonly MAX_GPA = 10.0;
+  private static readonly MIN_GPA = 0;
 
   constructor() {
     this.zkpDir = path.join(__dirname, '../../../zkp/build');
@@ -22,6 +24,25 @@ export class ZKPService {
   }): Promise<{ proof: any; publicSignals: any }> {
     try {
       logger.info('Generating GPA proof');
+
+      if (!Number.isFinite(input.gpa) || !Number.isFinite(input.threshold)) {
+        throw new Error('GPA and threshold must be valid numbers');
+      }
+
+      if (input.gpa < ZKPService.MIN_GPA || input.gpa > ZKPService.MAX_GPA) {
+        throw new Error(
+          `GPA proof circuit supports only ${ZKPService.MIN_GPA.toFixed(1)}-${ZKPService.MAX_GPA.toFixed(1)} GPA values; received ${input.gpa}`
+        );
+      }
+
+      if (
+        input.threshold < ZKPService.MIN_GPA ||
+        input.threshold > ZKPService.MAX_GPA
+      ) {
+        throw new Error(
+          `GPA proof threshold must be between ${ZKPService.MIN_GPA.toFixed(1)} and ${ZKPService.MAX_GPA.toFixed(1)}; received ${input.threshold}`
+        );
+      }
 
       // Scale GPA values (multiply by 100)
       const scaledGPA = Math.floor(input.gpa * 100);
@@ -176,5 +197,3 @@ export class ZKPService {
     return BigInt('0x' + randomBytes.toString('hex'));
   }
 }
-
-

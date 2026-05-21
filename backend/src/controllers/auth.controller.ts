@@ -12,7 +12,11 @@ const nonces = new Map<string, string>();
 /**
  * Get nonce for signing
  */
-export const getNonce = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const getNonce = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
   try {
     const { address } = req.params;
 
@@ -20,7 +24,7 @@ export const getNonce = async (req: Request, res: Response, next: NextFunction):
     if (!ethers.isAddress(address)) {
       res.status(400).json({
         success: false,
-        message: 'Invalid Ethereum address',
+        message: "Invalid Ethereum address",
       });
       return;
     }
@@ -37,7 +41,7 @@ export const getNonce = async (req: Request, res: Response, next: NextFunction):
       data: { nonce },
     });
   } catch (error: any) {
-    logger.error('Error generating nonce:', error);
+    logger.error("Error generating nonce:", error);
     next(error);
   }
 };
@@ -45,7 +49,11 @@ export const getNonce = async (req: Request, res: Response, next: NextFunction):
 /**
  * Login with Ethereum signature
  */
-export const login = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const login = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
   try {
     const { address, signature, message } = req.body;
 
@@ -57,7 +65,7 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
     if (recoveredAddress.toLowerCase() !== normalizedAddress) {
       res.status(401).json({
         success: false,
-        message: 'Invalid signature',
+        message: "Invalid signature",
       });
       return;
     }
@@ -67,7 +75,7 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
     if (!expectedNonce || !message.includes(expectedNonce)) {
       res.status(401).json({
         success: false,
-        message: 'Invalid or expired nonce',
+        message: "Invalid or expired nonce",
       });
       return;
     }
@@ -84,10 +92,12 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
       user = await prisma.user.create({
         data: {
           address: normalizedAddress,
-          role: 'CANDIDATE',
+          role: "CANDIDATE",
         },
       });
-      logger.info(`Auto-registered new user: ${normalizedAddress} as CANDIDATE`);
+      logger.info(
+        `Auto-registered new user: ${normalizedAddress} as CANDIDATE`,
+      );
     }
 
     // Generate JWT token
@@ -110,7 +120,7 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
       },
     });
   } catch (error: any) {
-    logger.error('Login error:', error);
+    logger.error("Login error:", error);
     next(error);
   }
 };
@@ -118,7 +128,11 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
 /**
  * Register new user
  */
-export const register = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const register = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
   try {
     const { address, role, email } = req.body;
 
@@ -132,7 +146,7 @@ export const register = async (req: Request, res: Response, next: NextFunction):
     if (existingUser) {
       res.status(409).json({
         success: false,
-        message: 'User already registered',
+        message: "User already registered",
       });
       return;
     }
@@ -159,7 +173,7 @@ export const register = async (req: Request, res: Response, next: NextFunction):
       },
     });
   } catch (error: any) {
-    logger.error('Registration error:', error);
+    logger.error("Registration error:", error);
     next(error);
   }
 };

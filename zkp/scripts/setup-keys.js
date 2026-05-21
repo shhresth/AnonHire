@@ -8,6 +8,7 @@ const execAsync = promisify(exec);
 const circuits = ["gpa_proof", "experience_proof"];
 const buildDir = path.join(__dirname, "..", "build");
 const ptauFile = path.join(buildDir, "powersOfTau28_hez_final_12.ptau");
+const snarkjsCmd = process.env.SNARKJS_BIN || "npx snarkjs";
 
 async function setupCircuitKeys(circuitName) {
   console.log(`\n=== Setting up keys for ${circuitName} ===`);
@@ -26,26 +27,26 @@ async function setupCircuitKeys(circuitName) {
     console.log("Generating zkey...");
     const zkeyInitFile = path.join(circuitDir, `${circuitName}_0000.zkey`);
     await execAsync(
-      `snarkjs groth16 setup ${r1csFile} ${ptauFile} ${zkeyInitFile}`
+      `${snarkjsCmd} groth16 setup ${r1csFile} ${ptauFile} ${zkeyInitFile}`
     );
     
     // Contribute to ceremony (Phase 2)
     console.log("Contributing to ceremony...");
     const zkeyContribFile = path.join(circuitDir, `${circuitName}_0001.zkey`);
     await execAsync(
-      `snarkjs zkey contribute ${zkeyInitFile} ${zkeyContribFile} --name="First contribution" -v -e="random entropy"`
+      `${snarkjsCmd} zkey contribute ${zkeyInitFile} ${zkeyContribFile} --name="First contribution" -v -e="random entropy"`
     );
     
     // Finalize zkey
     console.log("Finalizing zkey...");
     await execAsync(
-      `snarkjs zkey beacon ${zkeyContribFile} ${zkeyFile} 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f 10 -n="Final Beacon"`
+      `${snarkjsCmd} zkey beacon ${zkeyContribFile} ${zkeyFile} 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f 10 -n="Final Beacon"`
     );
     
     // Export verification key
     console.log("Exporting verification key...");
     await execAsync(
-      `snarkjs zkey export verificationkey ${zkeyFile} ${vkeyFile}`
+      `${snarkjsCmd} zkey export verificationkey ${zkeyFile} ${vkeyFile}`
     );
     
     // Clean up intermediate files
@@ -86,5 +87,4 @@ main()
     console.error("Key setup failed:", error);
     process.exit(1);
   });
-
 

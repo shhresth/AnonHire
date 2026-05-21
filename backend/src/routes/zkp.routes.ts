@@ -15,8 +15,8 @@ router.post(
   '/gpa/generate',
   authenticate,
   [
-    body('gpa').isFloat({ min: 0, max: 10 }).withMessage('GPA must be between 0 and 10'),
-    body('threshold').isFloat({ min: 0, max: 10 }).withMessage('Threshold must be between 0 and 10'),
+    body('gpa').isFloat({ min: 0, max: 10 }).withMessage('GPA must be between 0.0 and 10.0'),
+    body('threshold').isFloat({ min: 0, max: 10 }).withMessage('GPA threshold must be between 0.0 and 10.0'),
     body('credentialHash').notEmpty().withMessage('Credential hash is required'),
   ],
   validate,
@@ -33,7 +33,7 @@ router.post(
   authenticate,
   [
     body('credentialId').notEmpty().withMessage('Credential ID is required'),
-    body('threshold').isFloat({ min: 0, max: 10 }).withMessage('Threshold must be between 0 and 10'),
+    body('threshold').isFloat({ min: 0, max: 10 }).withMessage('GPA threshold must be between 0.0 and 10.0'),
   ],
   validate,
   zkpController.generateGPAProofFromCredential
@@ -103,5 +103,3 @@ router.post(
 );
 
 export default router;
-
-

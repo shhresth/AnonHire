@@ -16,10 +16,10 @@ template SimpleGPAProof() {
     gte.in[1] <== threshold;
     valid <== gte.out;
     
-    // Range check: GPA should be between 0 and 400 (4.0 * 100)
+    // Range check: GPA should be between 0 and 1000 (10.0 * 100)
     component rangeCheck1 = LessEqThan(32);
     rangeCheck1.in[0] <== gpa;
-    rangeCheck1.in[1] <== 400;
+    rangeCheck1.in[1] <== 1000;
     rangeCheck1.out === 1;
     
     component rangeCheck2 = GreaterEqThan(32);

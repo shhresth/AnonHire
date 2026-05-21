@@ -11,14 +11,14 @@ const router = Router();
  * @access  Public
  */
 router.post(
-  '/login',
+  "/login",
   [
-    body('address').isEthereumAddress().withMessage('Invalid Ethereum address'),
-    body('signature').notEmpty().withMessage('Signature is required'),
-    body('message').notEmpty().withMessage('Message is required'),
+    body("address").isEthereumAddress().withMessage("Invalid Ethereum address"),
+    body("signature").notEmpty().withMessage("Signature is required"),
+    body("message").notEmpty().withMessage("Message is required"),
   ],
   validate,
-  authController.login
+  authController.login,
 );
 
 /**
@@ -27,14 +27,22 @@ router.post(
  * @access  Public
  */
 router.post(
-  '/register',
+  "/register",
   [
-    body('address').isEthereumAddress().withMessage('Invalid Ethereum address'),
-    body('role').isIn(['UNIVERSITY', 'EMPLOYER', 'INTERNSHIP_PROVIDER', 'CANDIDATE', 'VERIFIER']).withMessage('Invalid role'),
-    body('email').optional().isEmail().withMessage('Invalid email'),
+    body("address").isEthereumAddress().withMessage("Invalid Ethereum address"),
+    body("role")
+      .isIn([
+        "UNIVERSITY",
+        "EMPLOYER",
+        "INTERNSHIP_PROVIDER",
+        "CANDIDATE",
+        "VERIFIER",
+      ])
+      .withMessage("Invalid role"),
+    body("email").optional().isEmail().withMessage("Invalid email"),
   ],
   validate,
-  authController.register
+  authController.register,
 );
 
 /**
@@ -42,8 +50,6 @@ router.post(
  * @desc    Get nonce for signing
  * @access  Public
  */
-router.get('/nonce/:address', authController.getNonce);
+router.get("/nonce/:address", authController.getNonce);
 
 export default router;
-
-

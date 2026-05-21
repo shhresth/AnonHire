@@ -32,24 +32,24 @@ template GPAProof() {
     signal output valid;
     
     // Constants
-    var MAX_GPA = 400; // 4.0 scaled by 100
+    var MAX_GPA = 1000; // 10.0 scaled by 100
     var MIN_GPA = 0;
     
-    // Constraint: GPA must be in valid range (0 to 4.0)
+    // Constraint: GPA must be in valid range (0 to 10.0)
     component gpaRangeCheck = LessEqThan(32);
-    gpaRangeCheck.in[0] = gpa;
-    gpaRangeCheck.in[1] = MAX_GPA;
+    gpaRangeCheck.in[0] <== gpa;
+    gpaRangeCheck.in[1] <== MAX_GPA;
     gpaRangeCheck.out === 1;
     
     component gpaMinCheck = GreaterEqThan(32);
-    gpaMinCheck.in[0] = gpa;
-    gpaMinCheck.in[1] = MIN_GPA;
+    gpaMinCheck.in[0] <== gpa;
+    gpaMinCheck.in[1] <== MIN_GPA;
     gpaMinCheck.out === 1;
     
     // Check if GPA >= threshold
     component gpaCheck = GreaterEqThan(32);
-    gpaCheck.in[0] = gpa;
-    gpaCheck.in[1] = threshold;
+    gpaCheck.in[0] <== gpa;
+    gpaCheck.in[1] <== threshold;
     valid <== gpaCheck.out;
     
     // Compute commitment using Poseidon hash
@@ -63,5 +63,3 @@ template GPAProof() {
 }
 
 component main {public [threshold, expectedCommitment]} = GPAProof();
-
-

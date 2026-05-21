@@ -657,7 +657,7 @@ export const getRevokedCredentials = async (
 async function getUserIdByAddress(address: string): Promise<string> {
   const normalizedAddress = address.toLowerCase();
   let user = await prisma.user.findUnique({ where: { address: normalizedAddress } });
-  
+
   if (!user) {
     user = await prisma.user.create({
       data: {
@@ -666,7 +666,6 @@ async function getUserIdByAddress(address: string): Promise<string> {
       }
     });
   }
-  
+
   return user.id;
 }
-

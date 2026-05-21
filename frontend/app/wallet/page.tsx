@@ -10,6 +10,65 @@ import Link from 'next/link';
 import TopNav from '@/components/TopNav';
 import { decryptCredentialData, generateClientProofPackage } from '@/lib/client-zkp';
 
+function resolveIssuerLabel(issuer: any): string {
+  if (!issuer) return 'Unknown';
+
+  if (typeof issuer === 'string') {
+    return issuer;
+  }
+
+  const nestedProfile = issuer.profile || issuer.organization || issuer.metadata || {};
+  const candidates = [
+    issuer.name,
+    issuer.displayName,
+    issuer.organizationName,
+    issuer.companyName,
+    issuer.universityName,
+    issuer.institutionName,
+    issuer.issuerName,
+    issuer.legalName,
+    nestedProfile.name,
+    nestedProfile.displayName,
+    nestedProfile.organizationName,
+    nestedProfile.companyName,
+    nestedProfile.universityName,
+    nestedProfile.institutionName,
+    issuer.address,
+  ];
+
+  const match = candidates.find((value) => typeof value === 'string' && value.trim().length > 0);
+  return match || 'Unknown';
+}
+
+function resolveIssuerFromCredentialDetails(type: string, details: any, fallback: string): string {
+  if (!details || typeof details !== 'object') return fallback;
+
+  if (type === 'ACADEMIC') {
+    return (
+      details.institution ||
+      details.institutionName ||
+      details.university ||
+      details.universityName ||
+      details.college ||
+      details.school ||
+      fallback
+    );
+  }
+
+  if (type === 'JOB' || type === 'INTERNSHIP') {
+    return (
+      details.company ||
+      details.organization ||
+      details.organizationName ||
+      details.employer ||
+      details.department ||
+      fallback
+    );
+  }
+
+  return fallback;
+}
+
 export default function WalletPage() {
   const { address, isConnected } = useAccount();
   const [isMounted, setIsMounted] = useState(false);
@@ -105,7 +164,7 @@ export default function WalletPage() {
         id: c.id || c.credentialHash || Math.random().toString(36).slice(2),
         dbId: c.id || null,
         type: c.credentialType || c.type || 'UNKNOWN',
-        issuer: c.issuer?.address || c.issuer || 'Unknown',
+        issuer: resolveIssuerLabel(c.issuer),
         issuedAt: c.issuedAt ? new Date(c.issuedAt).toISOString().split('T')[0] : '',
         status: c.isRevoked ? 'revoked' : 'active',
         details: {},
@@ -230,15 +289,8 @@ export default function WalletPage() {
 
             {/* Credentials List */}
             <div className="bg-white rounded-lg shadow-lg p-6">
-              <div className="flex justify-between items-center mb-6">
+              <div className="mb-6">
                 <h3 className="text-xl font-bold text-gray-900">My Credentials</h3>
-                <button 
-                  onClick={() => setShowAddModal(true)}
-                  className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
-                >
-                  <FaPlus />
-                  <span>Add Credential</span>
-                </button>
               </div>
 
               {loadingList ? (
@@ -660,6 +712,7 @@ function ZKPModal({ onClose, credentials }: any) {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [issuerLabels, setIssuerLabels] = useState<Record<string, string>>({});
 
   const isGPA = proofType === 'gpa_proof';
 
@@ -667,6 +720,43 @@ function ZKPModal({ onClose, credentials }: any) {
   const eligibleCredentials = credentials.filter((c: any) =>
     isGPA ? c.type === 'ACADEMIC' : (c.type === 'JOB' || c.type === 'INTERNSHIP')
   );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadIssuerLabels = async () => {
+      const nextLabels: Record<string, string> = {};
+
+      await Promise.all(
+        eligibleCredentials.map(async (credential: any) => {
+          const key = String(credential.dbId || credential.id);
+          nextLabels[key] = credential.issuer;
+
+          if (!credential.encryptedData) return;
+
+          try {
+            const decrypted = await decryptCredentialData(credential.encryptedData);
+            const details = decrypted?.credentialSubject || decrypted || {};
+            nextLabels[key] = resolveIssuerFromCredentialDetails(credential.type, details, credential.issuer);
+          } catch {
+            nextLabels[key] = credential.issuer;
+          }
+        })
+      );
+
+      if (!cancelled) {
+        setIssuerLabels(nextLabels);
+      }
+    };
+
+    loadIssuerLabels();
+    return () => {
+      cancelled = true;
+    };
+  }, [credentials, proofType]);
+
+  const getCredentialIssuerLabel = (credential: any) =>
+    issuerLabels[String(credential.dbId || credential.id)] || credential.issuer;
 
   const generateZKP = async () => {
     if (!selectedCredentialId || !threshold) return;
@@ -799,7 +889,7 @@ function ZKPModal({ onClose, credentials }: any) {
                 <option value="">Choose a credential…</option>
                 {eligibleCredentials.map((cred: any) => (
                   <option key={cred.dbId || cred.id} value={cred.dbId || cred.id}>
-                    {cred.type} — {cred.issuer} ({cred.issuedAt})
+                    {cred.type} — {getCredentialIssuerLabel(cred)} ({cred.issuedAt})
                   </option>
                 ))}
               </select>
@@ -1024,7 +1114,7 @@ function ShareModal({ onClose, credentials, preSelectedCredential }: any) {
               <div className="text-2xl">{cred.type === 'ACADEMIC' ? '🎓' : cred.type === 'JOB' ? '💼' : '📋'}</div>
               <div>
                 <p className="font-semibold text-gray-900">{cred.type} Credential</p>
-                <p className="text-sm text-gray-500">{cred.issuer} · {cred.issuedAt}</p>
+                <p className="text-sm text-gray-500">{getCredentialIssuerLabel(cred)} · {cred.issuedAt}</p>
               </div>
             </div>
           )}
@@ -1386,5 +1476,3 @@ function ViewCredentialModal({ credential, onClose }: any) {
     </div>
   );
 }
-
-

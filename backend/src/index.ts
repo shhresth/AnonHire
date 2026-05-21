@@ -13,13 +13,35 @@ import routes from './routes';
 
 const app: Application = express();
 const PORT = process.env.PORT || 3001;
+const configuredOrigins = (process.env.CORS_ORIGIN || 'http://localhost:3000')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const localhostPattern = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+
+const corsOptions: cors.CorsOptions = {
+  origin(origin, callback) {
+    // Allow non-browser clients and local frontend variants during development.
+    if (
+      !origin ||
+      configuredOrigins.includes(origin) ||
+      localhostPattern.test(origin)
+    ) {
+      callback(null, true);
+      return;
+    }
+
+    callback(new Error(`CORS blocked for origin: ${origin}`));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+};
 
 // Middleware
 app.use(helmet());
-app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
-  credentials: true
-}));
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -69,4 +91,3 @@ process.on('SIGINT', () => {
 });
 
 export default app;
-

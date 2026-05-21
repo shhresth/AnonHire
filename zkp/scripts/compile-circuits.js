@@ -12,6 +12,8 @@ const circuits = [
 
 const circuitsDir = path.join(__dirname, "..", "circuits");
 const buildDir = path.join(__dirname, "..", "build");
+const circomCmd = process.env.CIRCOM_BIN || "circom";
+const snarkjsCmd = process.env.SNARKJS_BIN || "npx snarkjs";
 
 async function compileCircuit(circuitName, circuitFile) {
   console.log(`\nCompiling ${circuitName}...`);
@@ -26,7 +28,7 @@ async function compileCircuit(circuitName, circuitFile) {
   
   try {
     // Compile circuit
-        const compileCmd = `circom2 ${circuitPath} --r1cs --wasm --sym -o ${outputDir} -l ../node_modules`;
+        const compileCmd = `${circomCmd} ${circuitPath} --r1cs --wasm --sym -o ${outputDir} -l ../node_modules`;
     console.log(`Running: ${compileCmd}`);
     
     const { stdout, stderr } = await execAsync(compileCmd);
@@ -39,7 +41,7 @@ async function compileCircuit(circuitName, circuitFile) {
     // Display circuit info
     const r1csFile = path.join(outputDir, `${circuitName}.r1cs`);
     if (fs.existsSync(r1csFile)) {
-      const infoCmd = `snarkjs r1cs info ${r1csFile}`;
+      const infoCmd = `${snarkjsCmd} r1cs info ${r1csFile}`;
       const { stdout: infoOut } = await execAsync(infoCmd);
       console.log(infoOut);
     }
@@ -58,12 +60,12 @@ async function main() {
     fs.mkdirSync(buildDir, { recursive: true });
   }
   
-  // Check if circom2 is installed
+  // Check if circom is installed
   try {
-    await execAsync("circom2 --version");
+    await execAsync(`${circomCmd} --version`);
   } catch (error) {
-    console.error("\n❌ Error: circom2 is not installed");
-    console.error("Please install circom2 from: https://docs.circom.io/getting-started/installation/");
+    console.error(`\n❌ Error: ${circomCmd} is not installed`);
+    console.error("Please install Circom from: https://docs.circom.io/getting-started/installation/");
     process.exit(1);
   }
   
@@ -82,5 +84,4 @@ main()
     console.error("Compilation failed:", error);
     process.exit(1);
   });
-
 

@@ -17,13 +17,13 @@ model User {
   role          UserRole @default(CANDIDATE)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
-  
+
   // Relations
   issuedCredentials     Credential[] @relation("Issuer")
   receivedCredentials   Credential[] @relation("Subject")
   verifications         Verification[]
   auditLogs             AuditLog[]
-  
+
   @@index([address])
   @@index([did])
 }
@@ -53,12 +53,12 @@ model Credential {
   txHash            String?          @unique
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
-  
+
   // Relations
   issuer            User             @relation("Issuer", fields: [issuerId], references: [id])
   subject           User             @relation("Subject", fields: [subjectId], references: [id])
   verifications     Verification[]
-  
+
   @@index([credentialHash])
   @@index([issuerId])
   @@index([subjectId])
@@ -79,11 +79,11 @@ model Verification {
   verifiedAt      DateTime @default(now())
   proofType       String?
   proofData       String?  @db.Text
-  
+
   // Relations
   credential      Credential @relation(fields: [credentialId], references: [id])
   verifier        User       @relation(fields: [verifierId], references: [id])
-  
+
   @@index([credentialId])
   @@index([verifierId])
 }
@@ -97,10 +97,10 @@ model AuditLog {
   ipAddress   String?
   userAgent   String?
   timestamp   DateTime @default(now())
-  
+
   // Relations
   user        User     @relation(fields: [userId], references: [id])
-  
+
   @@index([userId])
   @@index([action])
   @@index([timestamp])
@@ -115,8 +115,7 @@ model IPFSPin {
   isPinned    Boolean  @default(true)
   createdAt   DateTime @default(now())
   unpinnedAt  DateTime?
-  
+
   @@index([ipfsHash])
   @@index([isPinned])
 }
-
